@@ -1,0 +1,17 @@
+{
+  "prompts": [
+    "Explain the difference between TCP and UDP in two sentences.",
+    "Write a Python function that reverses a linked list.",
+    "Summarize the plot of Hamlet in three sentences.",
+    "What are the main causes of inflation?",
+    "Give three tips for improving sleep quality."
+  ],
+  "model_by_engine": {
+    "vllm": "meta-llama/Llama-3.1-8B-Instruct",
+    "sglang": "meta-llama/Llama-3.1-8B-Instruct",
+    "tgi": "meta-llama/Llama-3.1-8B-Instruct",
+    "llama_cpp": "llama-3.1-8b-instruct-q4_k_m",
+    "mlx": "mlx-community/Llama-3.1-8B-Instruct-4bit",
+    "transformers": "meta-llama/Llama-3.1-8B-Instruct"
+  }
+}
