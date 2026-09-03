@@ -1,0 +1,20 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python tests/test_metrics.py
+      - name: End-to-end run against live mock server
+        run: |
+          python tests/mock_server.py &
+          sleep 1
+          VLLM_ENDPOINT=http://127.0.0.1:8899 python -m harness.runner --config configs/prompts.json --repeats 2 --out results.json
+          python -c "import json; r=json.load(open('results.json'))['results']; m=[x for x in r if x['status']=='MEASURED']; b=[x for x in r if x['status']=='BLOCKED']; assert len(m)==1 and len(b)==5, r; print('E2E OK: 1 MEASURED, 5 BLOCKED')"
