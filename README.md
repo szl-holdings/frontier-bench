@@ -1,64 +1,24 @@
-# Frontier Inference Engine Benchmark Harness
+# Frontier Bench
 
-Real, runnable benchmark harness for comparing OpenAI-compatible LLM inference
-engines (vLLM, SGLang, TGI, llama.cpp, MLX, Transformers) on identical prompts.
+Measured inference-engine evidence for the SZL stack — the public bench for the **szl-forge** engine.
 
-## Design guarantees
+## What this is
 
-- No fabricated data. Engines without a configured endpoint are reported
-  as BLOCKED, never simulated or guessed.
-- No vendor lock-in. Any engine exposing an OpenAI-compatible
-  /v1/chat/completions endpoint can be registered and measured.
-- Real timing only. TTFT and total latency come from actual HTTP
-  streaming responses, measured with time.perf_counter().
-- Health-gated. A request is only issued to an engine after its health
-  endpoint responds successfully.
+The honest companion to every engine claim. If the estate says the engine is fast, this is where the number lives — with the machine, the date, and the method attached. Unmeasured claims say so.
 
-## Usage
+## Guarantees
 
-1. Start the engine(s) you want to test (example for vLLM):
-   ```bash
-   vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
-   export VLLM_ENDPOINT=http://localhost:8000
-   ```
+- **Honest benchmarks** — every published number is labeled with hardware, date, and method; projections are marked as projections or omitted.
+- **Receipts** — benchmark runs are hashed and chained so results history is tamper-evident.
+- **Portable engine evidence** — the same tree compiles for CPU, CUDA, and Metal targets.
+- **Fail-closed display** — the public surface renders only verified results; anything unverifiable appears as absent.
 
-2. Repeat for any other engine (SGLANG_ENDPOINT, TGI_ENDPOINT,
-   LLAMACPP_ENDPOINT, MLX_ENDPOINT, TRANSFORMERS_ENDPOINT).
+## Public surface
 
-3. Run the benchmark:
-   ```bash
-   python -m harness.runner --config configs/prompts.json --repeats 5 --out results.json
-   ```
+The consolidated public bench lives at [betterwithage/szl-bench-suite](https://huggingface.co/spaces/betterwithage/szl-bench-suite) (Engine Bench tab) — one evidence surface for engine, retrieval, and quantization claims.
 
-4. Inspect results.json — each engine will show either:
-   - "status": "MEASURED" with p50/p95/p99 TTFT, p50/p95/p99 total latency,
-     and mean throughput (tokens/sec), or
-   - "status": "BLOCKED" with the reason (endpoint not configured, or
-     health check failed).
+Hardware truth is sourced from the published runtime witness ([szl-holdings/lutar-runtime-witness](https://github.com/szl-holdings/lutar-runtime-witness)), whose verifier recomputes every digest from source and fails closed on drift.
 
-## Tests
+## Status
 
-```bash
-python tests/test_metrics.py          # unit tests for percentile/statistics logic
-python tests/mock_server.py &         # starts a local mock OpenAI-compatible server
-VLLM_ENDPOINT=http://127.0.0.1:8899 python -m harness.runner --config configs/prompts.json --repeats 2
-```
-
-The unit tests and a full end-to-end run against the mock server (real HTTP
-round trips, real percentile math) passed before this code was pushed.
-
-## Files
-
-- harness/engine_registry.py — engine definitions, env-var-based endpoint resolution
-- harness/client.py — minimal dependency-free OpenAI-compatible streaming client
-- harness/metrics.py — percentile and throughput aggregation (no external stats libs)
-- harness/runner.py — CLI entrypoint tying it together
-- configs/prompts.json — shared prompt set + per-engine model identifiers
-- tests/ — unit tests and a mock server for full pipeline validation
-
-## Extending
-
-To add a new engine, add an EngineSpec entry to REGISTRY in
-engine_registry.py with its endpoint env var name, then set that env var
-before running. No other code changes needed since the client speaks the
-generic OpenAI chat-completions protocol.
+Foundation (2026-09-03): honest-results contract, bench schema, and verifier in place. Measured results land here from the dedicated GPU node as runs complete.
