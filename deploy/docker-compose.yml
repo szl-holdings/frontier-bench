@@ -1,0 +1,14 @@
+services:
+  frontier-bench-api:
+    build: ..
+    image: szl/frontier-bench-api:0.1.0
+    ports:
+      - "7861:7860"
+    volumes:
+      - ../site:/srv/site:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:7860/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
