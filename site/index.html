@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#071411">
+    <meta name="description" content="Receipted SZL engine, retrieval, and quantization evidence.">
+    <title>SZL Bench Suite</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#evidence">Skip to evidence</a>
+    <header class="hero">
+      <nav class="nav" aria-label="Primary">
+        <a class="brand" href="./" aria-label="SZL Bench Suite home">
+          <span class="brand-mark" aria-hidden="true">SZL</span>
+          <span>Bench Suite</span>
+        </a>
+        <a class="source-link" href="https://github.com/szl-holdings/frontier-bench">Source <span aria-hidden="true">↗</span></a>
+      </nav>
+
+      <div class="hero-grid">
+        <div>
+          <p class="eyebrow">Public evidence surface</p>
+          <h1>Measurements with receipts,<br><span>or no claim at all.</span></h1>
+          <p class="lede">One source-bound view of engine, retrieval, and quantization results. Every displayed row passed its owning verifier before publication.</p>
+        </div>
+        <aside class="proof-card" aria-label="Publication guarantees">
+          <p class="proof-kicker">Publication contract</p>
+          <ul>
+            <li><span aria-hidden="true">✓</span> Exact source revisions</li>
+            <li><span aria-hidden="true">✓</span> Independent receipt verification</li>
+            <li><span aria-hidden="true">✓</span> One atomic provider commit</li>
+          </ul>
+        </aside>
+      </div>
+    </header>
+
+    <main id="evidence">
+      <section class="status-strip" aria-label="Current publication status">
+        <div><span class="status-dot" aria-hidden="true"></span><span id="load-state">Loading verified evidence…</span></div>
+        <dl>
+          <div><dt>Receipts</dt><dd id="receipt-count">—</dd></div>
+          <div><dt>Sources</dt><dd id="source-count">—</dd></div>
+          <div><dt>Evidence through</dt><dd id="published-at">—</dd></div>
+        </dl>
+      </section>
+
+      <section class="evidence-section" aria-labelledby="evidence-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Verified results</p>
+            <h2 id="evidence-title">Three planes. One truth standard.</h2>
+          </div>
+          <p>Empty planes remain visibly empty. BLOCKED, UNAVAILABLE, and unmeasured data are never promoted into benchmark claims.</p>
+        </div>
+
+        <div class="tabs" role="tablist" aria-label="Benchmark planes">
+          <button id="tab-engine" role="tab" aria-selected="true" aria-controls="panel-engine" tabindex="0" data-plane="engine">Engine <span id="count-engine">0</span></button>
+          <button id="tab-retrieval" role="tab" aria-selected="false" aria-controls="panel-retrieval" tabindex="-1" data-plane="retrieval">Retrieval <span id="count-retrieval">0</span></button>
+          <button id="tab-quant" role="tab" aria-selected="false" aria-controls="panel-quant" tabindex="-1" data-plane="quant">Quantization <span id="count-quant">0</span></button>
+        </div>
+
+        <div id="panel-engine" class="panel" role="tabpanel" aria-labelledby="tab-engine" data-panel="engine"></div>
+        <div id="panel-retrieval" class="panel" role="tabpanel" aria-labelledby="tab-retrieval" data-panel="retrieval" hidden></div>
+        <div id="panel-quant" class="panel" role="tabpanel" aria-labelledby="tab-quant" data-panel="quant" hidden></div>
+      </section>
+
+      <section class="provenance" aria-labelledby="provenance-title">
+        <div>
+          <p class="eyebrow">Reproducibility</p>
+          <h2 id="provenance-title">Bound to what actually ran.</h2>
+          <p>The publisher checks out each evidence repository, runs its verifier, and records the exact 40-character revision beside the admitted results.</p>
+        </div>
+        <div id="source-list" class="source-list" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <footer>
+      <p>SZL Holdings · Truthful systems engineering</p>
+      <p id="deployment-state">Deployment receipt loading…</p>
+    </footer>
+  </body>
+</html>
