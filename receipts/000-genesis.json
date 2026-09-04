@@ -1,0 +1,14 @@
+{
+  "hash": "de352dd39bc106b2d64f8f4cad536e4a26317da6c38d64e282dcb107ab179c37",
+  "machine": {
+    "cpu": "i9-14900HX",
+    "gpu": "RTX 4000 Ada 20GB",
+    "ram_gb": 128
+  },
+  "measured_at": "2026-09-04T02:15:00Z",
+  "method": "pipeline-init/0.1 (no run executed; chain genesis)",
+  "metrics": {},
+  "plane": "engine",
+  "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "status": "BLOCKED"
+}
