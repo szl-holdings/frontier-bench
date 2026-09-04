@@ -1,12 +1,19 @@
-name: bench-pipeline
+name: bench-suite-publisher
 
 on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: betterwithage-szl-bench-suite-publisher
+  cancel-in-progress: false
 
 jobs:
   verify:
@@ -16,44 +23,86 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Verify receipt chain (fail-closed)
-        run: |
-          set -euo pipefail
-          if compgen -G "receipts/*.json" > /dev/null; then
-            python verify/verifier.py receipts/*.json
-          else
-            echo "no receipts yet - nothing to verify"
-          fi
+      - name: Verify engine receipt chain (fail closed)
+        run: python verify/verifier.py receipts/*.json
+      - name: Test the publisher bundle
+        run: python -m unittest discover -s tests -p "test_*.py" -v
 
   publish:
     needs: verify
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out the canonical publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check out retrieval receipts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: szl-holdings/retrieval-bench
+          path: inputs/retrieval-bench
+          persist-credentials: false
+          sparse-checkout: /receipts/*.json
+          sparse-checkout-cone-mode: false
+      - name: Check out quantization receipts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: szl-holdings/quant-curve
+          path: inputs/quant-curve
+          persist-credentials: false
+          sparse-checkout: /receipts/*.json
+          sparse-checkout-cone-mode: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Export verified results (MEASURED only)
-        run: python tools/sync_results.py receipts site/results.json
-      - name: Publish results.json to betterwithage/szl-bench-suite
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      - name: Export each independently verified result plane
+        shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${HF_TOKEN:-}" ]; then
-            echo "SKIPPED: HF_TOKEN secret not configured on this repo; results verified locally but not published"
-            exit 0
-          fi
-          pip install --quiet huggingface_hub
-          python - <<'PY'
-          from huggingface_hub import HfApi
-          HfApi().upload_file(
-              path_or_fileobj="site/results.json",
-              path_in_repo="results.json",
-              repo_id="betterwithage/szl-bench-suite",
-              repo_type="space",
-              commit_message="chore: publish verified bench results (frontier-bench)",
-          )
-          print("published verified results to the bench Space")
-          PY
+          for chain in \
+            receipts \
+            inputs/retrieval-bench/receipts \
+            inputs/quant-curve/receipts
+          do
+            compgen -G "$chain/*.json" > /dev/null || {
+              echo "required receipt chain is missing: $chain" >&2
+              exit 2
+            }
+          done
+          python tools/sync_results.py receipts build/engine.json engine
+          python tools/sync_results.py \
+            inputs/retrieval-bench/receipts build/retrieval.json retrieval
+          python tools/sync_results.py \
+            inputs/quant-curve/receipts build/quant.json quant
+      - name: Merge result planes and bind exact source revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/merge_results.py \
+            --output site/results.json \
+            --deployment-output site/deployment.json \
+            --input engine=build/engine.json \
+            --input retrieval=build/retrieval.json \
+            --input quant=build/quant.json \
+            --source "engine=szl-holdings/frontier-bench@$(git rev-parse HEAD)" \
+            --source "retrieval=szl-holdings/retrieval-bench@$(git -C inputs/retrieval-bench rev-parse HEAD)" \
+            --source "quant=szl-holdings/quant-curve@$(git -C inputs/quant-curve rev-parse HEAD)"
+      - name: Require the scoped provider credential
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${HF_TOKEN:-}" || {
+            echo "HF_TOKEN is required for the canonical publisher" >&2
+            exit 2
+          }
+      - name: Install the pinned Hub client
+        run: python -m pip install --disable-pip-version-check "huggingface_hub==1.30.0"
+      - name: Publish one atomic Space commit and verify readback
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python tools/publish_space.py
