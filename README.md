@@ -19,6 +19,8 @@ The consolidated public bench lives at [betterwithage/szl-bench-suite](https://h
 
 Hardware truth is sourced from the published runtime witness ([szl-holdings/lutar-runtime-witness](https://github.com/szl-holdings/lutar-runtime-witness)), whose verifier recomputes every digest from source and fails closed on drift.
 
+**Division of labor:** this repo is the display and verification surface — receipt schema, verifier, and the public bench page. The measurement harness that produces receipted engine runs lives in [szl-holdings/szl-engine-bench](https://github.com/szl-holdings/szl-engine-bench); the Wave 1 consolidated bakeoff report is [szl-holdings/szl-wave1-report](https://github.com/szl-holdings/szl-wave1-report).
+
 ## Status
 
 Foundation (2026-09-03): honest-results contract, bench schema, and verifier in place. Measured results land here from the dedicated GPU node as runs complete.
