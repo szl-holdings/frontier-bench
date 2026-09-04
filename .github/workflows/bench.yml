@@ -1,0 +1,59 @@
+name: bench-pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify receipt chain (fail-closed)
+        run: |
+          set -euo pipefail
+          if compgen -G "receipts/*.json" > /dev/null; then
+            python verify/verifier.py receipts/*.json
+          else
+            echo "no receipts yet - nothing to verify"
+          fi
+
+  publish:
+    needs: verify
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Export verified results (MEASURED only)
+        run: python tools/sync_results.py receipts site/results.json
+      - name: Publish results.json to betterwithage/szl-bench-suite
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HF_TOKEN:-}" ]; then
+            echo "SKIPPED: HF_TOKEN secret not configured on this repo; results verified locally but not published"
+            exit 0
+          fi
+          pip install --quiet huggingface_hub
+          python - <<'PY'
+          from huggingface_hub import HfApi
+          HfApi().upload_file(
+              path_or_fileobj="site/results.json",
+              path_in_repo="results.json",
+              repo_id="betterwithage/szl-bench-suite",
+              repo_type="space",
+              commit_message="chore: publish verified bench results (frontier-bench)",
+          )
+          print("published verified results to the bench Space")
+          PY
