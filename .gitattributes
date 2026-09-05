@@ -1,0 +1,3 @@
+deploy/bench-plane/* text eol=lf
+tools/publish_space.py text eol=lf
+tests/test_publish_space.py text eol=lf

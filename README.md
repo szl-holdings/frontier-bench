@@ -10,17 +10,25 @@ The honest companion to every engine claim. If the estate says the engine is fas
 
 - **Honest benchmarks** — every published number is labeled with hardware, date, and method; projections are marked as projections or omitted.
 - **Receipts** — benchmark runs are hashed and chained so results history is tamper-evident.
-- **Portable engine evidence** — the same tree compiles for CPU, CUDA, and Metal targets.
+- **Bounded claims** — source, receipt admission, CI, service runtime, and public readback have separate evidence.
 - **Fail-closed display** — the public surface renders only verified results; anything unverifiable appears as absent.
 
 ## Public surface
 
 The consolidated public bench lives at [betterwithage/szl-bench-suite](https://huggingface.co/spaces/betterwithage/szl-bench-suite) (Engine Bench tab) — one evidence surface for engine, retrieval, and quantization claims.
 
-Hardware truth is sourced from the published runtime witness ([szl-holdings/lutar-runtime-witness](https://github.com/szl-holdings/lutar-runtime-witness)), whose verifier recomputes every digest from source and fails closed on drift.
+Hardware identity is declared by receipts and checked against the dedicated-node policy.
+The receipt HMAC authenticates an operator assertion; no independent hardware witness is claimed.
 
-**Division of labor:** this repo is the sole publisher for the consolidated public Space. It checks out only receipt data from the retrieval and quantization sources at exact revisions, verifies all three planes with the canonical verifier here, combines the admitted results, and publishes one atomic Space commit. Producer code never runs in the credential-bearing publisher job. The measurement harness that produces receipted engine runs lives in [szl-holdings/szl-engine-bench](https://github.com/szl-holdings/szl-engine-bench); the Wave 1 consolidated bakeoff report is [szl-holdings/szl-wave1-report](https://github.com/szl-holdings/szl-wave1-report).
+**Division of labor:** this repository is the sole publisher for the consolidated Space.
+The [evidence controller](deploy/bench-plane/finish_bench_plane.py) reads reviewed immutable
+Git objects without executing producer code, verifies all three receipt chains, requires
+authentication for measured rows, and exports one digest-bound static bundle.
+The canonical publisher repeats receipt admission before committing and verifies immutable
+files, provider state, and exact public bytes. See the [operations guide](deploy/bench-plane/BENCH_PLANE_OPERATIONS.md).
 
 ## Status
 
-Foundation (2026-09-03): honest-results contract, bench schema, and verifier in place. Measured results land here from the dedicated GPU node as runs complete.
+The current chains contain only their BLOCKED genesis receipts: zero admitted measured
+rows. The evidence services can run with that dataset. Real benchmark execution and
+signed raw evidence remain the responsibility of the dedicated-node measurement producers.

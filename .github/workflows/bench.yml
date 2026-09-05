@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -27,6 +29,17 @@ jobs:
         run: python verify/verifier.py receipts/*.json
       - name: Test the publisher bundle
         run: python -m unittest discover -s tests -p "test_*.py" -v
+      - name: Test the evidence controller
+        run: python -I -B deploy/bench-plane/test_finish_bench_plane.py
+      - name: Test public result rendering
+        run: node --test deploy/bench-plane/test_bench_surface.mjs
+      - name: Audit reviewed sources and export the public bundle
+        run: >-
+          python -I -B deploy/bench-plane/finish_bench_plane.py
+          --audit-only --target local --workdir /tmp/szl-bench-verify
+          --space-readme deploy/bench-plane/szl-bench-suite.README.md
+          --space-index deploy/bench-plane/szl-bench-suite.index.html
+          --export-space-bundle /tmp/szl-bench-verify/bundle
 
   publish:
     needs: verify
@@ -39,57 +52,16 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Check out retrieval receipts
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: szl-holdings/retrieval-bench
-          path: inputs/retrieval-bench
-          persist-credentials: false
-          sparse-checkout: /receipts/*.json
-          sparse-checkout-cone-mode: false
-      - name: Check out quantization receipts
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: szl-holdings/quant-curve
-          path: inputs/quant-curve
-          persist-credentials: false
-          sparse-checkout: /receipts/*.json
-          sparse-checkout-cone-mode: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Export each independently verified result plane
-        shell: bash
-        run: |
-          set -euo pipefail
-          for chain in \
-            receipts \
-            inputs/retrieval-bench/receipts \
-            inputs/quant-curve/receipts
-          do
-            compgen -G "$chain/*.json" > /dev/null || {
-              echo "required receipt chain is missing: $chain" >&2
-              exit 2
-            }
-          done
-          python tools/sync_results.py receipts build/engine.json engine
-          python tools/sync_results.py \
-            inputs/retrieval-bench/receipts build/retrieval.json retrieval
-          python tools/sync_results.py \
-            inputs/quant-curve/receipts build/quant.json quant
-      - name: Merge result planes and bind exact source revisions
-        shell: bash
-        run: |
-          set -euo pipefail
-          python tools/merge_results.py \
-            --output site/results.json \
-            --deployment-output site/deployment.json \
-            --input engine=build/engine.json \
-            --input retrieval=build/retrieval.json \
-            --input quant=build/quant.json \
-            --source "engine=szl-holdings/frontier-bench@$(git rev-parse HEAD)" \
-            --source "retrieval=szl-holdings/retrieval-bench@$(git -C inputs/retrieval-bench rev-parse HEAD)" \
-            --source "quant=szl-holdings/quant-curve@$(git -C inputs/quant-curve rev-parse HEAD)"
+      - name: Re-admit reviewed sources and export one static bundle
+        run: >-
+          python -I -B deploy/bench-plane/finish_bench_plane.py
+          --audit-only --target local --workdir /tmp/szl-bench-publish
+          --space-readme deploy/bench-plane/szl-bench-suite.README.md
+          --space-index deploy/bench-plane/szl-bench-suite.index.html
+          --export-space-bundle /tmp/szl-bench-publish/bundle
       - name: Require the scoped provider credential
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -101,8 +73,8 @@ jobs:
             exit 2
           }
       - name: Install the pinned Hub client
-        run: python -m pip install --disable-pip-version-check "huggingface_hub==1.30.0"
+        run: python -m pip install --disable-pip-version-check -r deploy/bench-plane/requirements-publish.txt
       - name: Publish one atomic Space commit and verify readback
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: python tools/publish_space.py
+        run: python -I -B tools/publish_space.py --bundle-dir /tmp/szl-bench-publish/bundle
