@@ -1,5 +1,6 @@
 """Native receipt API controls, using stdlib unittest only."""
 import json
+import hashlib
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
@@ -10,6 +11,17 @@ from verify.verifier import GENESIS, digest, verify
 
 
 class NativeVerifierTests(unittest.TestCase):
+    def test_recorded_native_repair_report_recomputes(self):
+        path = Path(__file__).resolve().parents[1] / "evidence/eclipse-native-repaired-20260905.json"
+        report = json.loads(path.read_text(encoding="utf-8"))
+        receipt = report.pop("receipt")
+        encoded = json.dumps(report, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        self.assertEqual(hashlib.sha256(encoded.encode()).hexdigest(), receipt)
+        self.assertEqual(report["sensitivity"], "10/10")
+        self.assertEqual(report["blind_spots"], [])
+        self.assertTrue(report["baseline"]["valid"])
+        self.assertEqual(report["baseline"]["detail"]["measured_count"], 3)
+
     def test_empty_collection_and_iterator_fail_closed(self):
         for paths in ([], (), iter(())):
             errors, measured = verify(paths)
