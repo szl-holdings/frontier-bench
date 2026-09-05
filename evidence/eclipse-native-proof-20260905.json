@@ -1,0 +1,212 @@
+{
+  "baseline": {
+    "detail": {
+      "errors": [],
+      "measured_count": 3,
+      "measured_paths_match": true
+    },
+    "valid": true
+  },
+  "blind_spots": [],
+  "golden_chain": [
+    {
+      "hash": "cfdd9d4c5ac3be094f91d7ab6b87441f800795a752576e6fa1b8bc85d2d46dd9",
+      "machine": {
+        "cpu": "fixture-control",
+        "gpu": "none",
+        "ram_gb": 1
+      },
+      "measured_at": "2000-01-01T00:00:00Z",
+      "method": "eclipse-native-control-v1",
+      "metrics": {
+        "score": 0.42
+      },
+      "plane": "engine",
+      "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "status": "MEASURED"
+    },
+    {
+      "hash": "701bba82f229704aed4c20ddaafa04e8dc1fcdd09cf8f2de665622898dd35ee8",
+      "machine": {
+        "cpu": "fixture-control",
+        "gpu": "none",
+        "ram_gb": 1
+      },
+      "measured_at": "2000-01-01T00:00:00Z",
+      "method": "eclipse-native-control-v1",
+      "metrics": {
+        "score": 0.421
+      },
+      "plane": "engine",
+      "prev_hash": "cfdd9d4c5ac3be094f91d7ab6b87441f800795a752576e6fa1b8bc85d2d46dd9",
+      "status": "MEASURED"
+    },
+    {
+      "hash": "29cb569383d29f9210d2befee0731feff2fac64336877c24753bfc1ea3444a99",
+      "machine": {
+        "cpu": "fixture-control",
+        "gpu": "none",
+        "ram_gb": 1
+      },
+      "measured_at": "2000-01-01T00:00:00Z",
+      "method": "eclipse-native-control-v1",
+      "metrics": {
+        "score": 0.422
+      },
+      "plane": "engine",
+      "prev_hash": "701bba82f229704aed4c20ddaafa04e8dc1fcdd09cf8f2de665622898dd35ee8",
+      "status": "MEASURED"
+    }
+  ],
+  "mutations": [
+    {
+      "accepted": false,
+      "caught": true,
+      "detail": {
+        "errors": [
+          "[1] hash mismatch (recomputed != declared)"
+        ],
+        "measured_count": 3,
+        "measured_paths_match": true
+      },
+      "input_hash": "8b896292d025a66aa30bc6e63192907c56beab741576dc2e78e4c9759362b9e0",
+      "mutation": "metric_tamper"
+    },
+    {
+      "accepted": false,
+      "caught": true,
+      "detail": {
+        "errors": [
+          "[0] <native-inputs>\\000.json: chain break (prev_hash mismatch)",
+          "[1] <native-inputs>\\001.json: chain break (prev_hash mismatch)",
+          "[2] <native-inputs>\\002.json: chain break (prev_hash mismatch)"
+        ],
+        "measured_count": 3,
+        "measured_paths_match": true
+      },
+      "input_hash": "0d3d3491923f9b364bb78b814f6a8ec880922bcb48efaab74b27c3122b608605",
+      "mutation": "reorder"
+    },
+    {
+      "accepted": false,
+      "caught": true,
+      "detail": {
+        "errors": [
+          "[2] hash mismatch (recomputed != declared)",
+          "[2] <native-inputs>\\002.json: chain break (prev_hash mismatch)"
+        ],
+        "measured_count": 3,
+        "measured_paths_match": true
+      },
+      "input_hash": "aca0eb890f7b2656f93462dde5d1aac71a529fd5ee96f275697d05ee7a91b7ce",
+      "mutation": "prevhash_swap"
+    },
+    {
+      "accepted": false,
+      "caught": true,
+      "detail": {
+        "errors": [
+          "[2] hash mismatch (recomputed != declared)"
+        ],
+        "measured_count": 3,
+        "measured_paths_match": true
+      },
+      "input_hash": "d8e59a578f802bcbe21896bad16af914b765c3bc5878ff93da921d48630e552d",
+      "mutation": "terminal_truncate"
+    },
+    {
+      "accepted": false,
+      "caught": true,
+      "detail": {
+        "errors": [
+          "[1] hash mismatch (recomputed != declared)"
+        ],
+        "measured_count": 3,
+        "measured_paths_match": true
+      },
+      "input_hash": "cb76c8adc0b47a8535f23b061e6c7db5750c02e010c21c820fc8ccee6c3e7e15",
+      "mutation": "plane_rename"
+    },
+    {
+      "accepted": false,
+      "caught": true,
+      "detail": {
+        "errors": [
+          "[1] hash mismatch (recomputed != declared)"
+        ],
+        "measured_count": 3,
+        "measured_paths_match": true
+      },
+      "input_hash": "97b5c35f15d2166383da2e4ffb415bbf13d83d3f4783c7e116f80d40e86a08e8",
+      "mutation": "key_rename"
+    },
+    {
+      "accepted": false,
+      "caught": true,
+      "detail": {
+        "errors": [
+          "[1] hash mismatch (recomputed != declared)"
+        ],
+        "measured_count": 3,
+        "measured_paths_match": true
+      },
+      "input_hash": "641a7d085edfae677bfcae40915a59f60d8228ae17c9af7c3a7419136c3b2bbf",
+      "mutation": "precision_drift_without_rehash"
+    },
+    {
+      "accepted": false,
+      "caught": true,
+      "detail": {
+        "errors": [
+          "[1] hash mismatch (recomputed != declared)"
+        ],
+        "measured_count": 3,
+        "measured_paths_match": true
+      },
+      "input_hash": "1fa1ccff626bb708d80153c935c3d4d8b584e9dc47554236d2c76ac4631a2818",
+      "mutation": "type_confusion"
+    },
+    {
+      "accepted": false,
+      "caught": true,
+      "detail": {
+        "errors": [
+          "empty receipt chain"
+        ],
+        "measured_count": 0,
+        "measured_paths_match": true
+      },
+      "input_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "mutation": "empty"
+    },
+    {
+      "accepted": false,
+      "caught": true,
+      "detail": {
+        "errors": [
+          "[2] <native-inputs>\\002.json: chain break (prev_hash mismatch)"
+        ],
+        "measured_count": 4,
+        "measured_paths_match": true
+      },
+      "input_hash": "0d2cc1c15dd8584adcae5c9c5456ed2c7f317d80bfc3a21752df75631caf5677",
+      "mutation": "duplicate_receipt"
+    }
+  ],
+  "plane": "engine",
+  "receipt": "03dad8c2f5d020bc757d30d7ce84adee7d45227b05c048829717ca7110f39639",
+  "schema": "szl.eclipse.native-plane.v1",
+  "scope": "LOCAL_FIXTURE_VERIFIER_CONTROLS",
+  "sensitivity": "10/10",
+  "source": {
+    "commit": "a754fbc98435e7ce9a9b3badc6193dd8e9206c14",
+    "repository": "szl-holdings/frontier-bench",
+    "tool": {
+      "commit": "b317063dcc0f04e938c0344da4608b387ee9ef42",
+      "repository": "szl-holdings/szl-eclipse"
+    },
+    "verifier_path": "verify/verifier.py",
+    "verifier_sha256": "f728b2e1ddc2e8add9d4a41981408a19e08e29798fe3e3f113a3a1d0b8bcdb82"
+  },
+  "state": "VERIFIED-SENSITIVE"
+}

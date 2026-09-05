@@ -12,7 +12,7 @@ from verify.verifier import GENESIS, digest, verify
 
 class NativeVerifierTests(unittest.TestCase):
     def test_recorded_native_repair_report_recomputes(self):
-        path = Path(__file__).resolve().parents[1] / "evidence/eclipse-native-repaired-20260905.json"
+        path = Path(__file__).resolve().parents[1] / "evidence/eclipse-native-proof-20260905.json"
         report = json.loads(path.read_text(encoding="utf-8"))
         receipt = report.pop("receipt")
         encoded = json.dumps(report, sort_keys=True, separators=(",", ":"), allow_nan=False)
@@ -21,6 +21,7 @@ class NativeVerifierTests(unittest.TestCase):
         self.assertEqual(report["blind_spots"], [])
         self.assertTrue(report["baseline"]["valid"])
         self.assertEqual(report["baseline"]["detail"]["measured_count"], 3)
+        self.assertTrue(report["baseline"]["detail"]["measured_paths_match"])
 
     def test_empty_collection_and_iterator_fail_closed(self):
         for paths in ([], (), iter(())):
