@@ -90,19 +90,9 @@ jobs:
             --source "engine=szl-holdings/frontier-bench@$(git rev-parse HEAD)" \
             --source "retrieval=szl-holdings/retrieval-bench@$(git -C inputs/retrieval-bench rev-parse HEAD)" \
             --source "quant=szl-holdings/quant-curve@$(git -C inputs/quant-curve rev-parse HEAD)"
-      - name: Require the scoped provider credential
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "${HF_TOKEN:-}" || {
-            echo "HF_TOKEN is required for the canonical publisher" >&2
-            exit 2
-          }
       - name: Install the pinned Hub client
         run: python -m pip install --disable-pip-version-check "huggingface_hub==1.30.0"
-      - name: Publish one atomic Space commit and verify readback
+      - name: Reconcile one atomic Space commit and verify readback
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: python tools/publish_space.py

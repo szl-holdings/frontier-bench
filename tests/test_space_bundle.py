@@ -34,6 +34,11 @@ class SpaceBundleTests(unittest.TestCase):
         self.assertEqual(1, publisher.count('TARGET = "betterwithage/szl-bench-suite"'))
         self.assertIn("parent_commit=before_sha", publisher)
         self.assertIn("_bundle_matches(before_sha)", publisher)
+        self.assertIn('"--cached-auth"', publisher)
+        self.assertIn("needs_write =", publisher)
+        self.assertIn("_live_url(observed)", publisher)
+        self.assertIn(".static.hf.space", publisher)
+        self.assertNotIn("Require the scoped provider credential", workflow)
         self.assertNotIn("SKIPPED: HF_TOKEN", workflow)
 
 

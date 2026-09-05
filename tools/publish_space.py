@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -14,9 +16,13 @@ from typing import Any
 
 
 TARGET = "betterwithage/szl-bench-suite"
-LIVE_URL = "https://betterwithage-szl-bench-suite.hf.space/"
 EXPECTED_MARKER = "SZL Bench Suite"
 READBACK_FILES = ("results.json", "deployment.json")
+ALLOWED_LIVE_HOSTS = {
+    "betterwithage-szl-bench-suite.hf.space",
+    "betterwithage-szl-bench-suite.static.hf.space",
+}
+TEXT_SUFFIXES = {".css", ".html", ".js", ".json", ".md", ".svg", ".txt"}
 
 
 def _field(value: Any, name: str, default: Any = None) -> Any:
@@ -30,9 +36,24 @@ def _stage(info: Any) -> str:
     return str(_field(runtime, "stage", "UNKNOWN") or "UNKNOWN").upper()
 
 
-def _fetch(path: str, revision: str) -> tuple[int, bytes]:
+def _live_url(info: Any) -> str:
+    value = str(_field(info, "host", "")).rstrip("/")
+    parsed = urllib.parse.urlparse(value)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname not in ALLOWED_LIVE_HOSTS
+        or parsed.path
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError(f"provider returned an unexpected live host: {value!r}")
+    return value + "/"
+
+
+def _fetch(base_url: str, path: str, revision: str) -> tuple[int, bytes]:
     request = urllib.request.Request(
-        f"{LIVE_URL}{path}?source_verify={revision}",
+        f"{base_url}{path}?source_verify={revision}",
         headers={"Cache-Control": "no-cache", "User-Agent": "SZL-Bench-Publisher/1.0"},
     )
     with urllib.request.urlopen(request, timeout=30) as response:
@@ -54,30 +75,63 @@ def _repo_file(path: str, revision: str) -> bytes | None:
         raise
 
 
-def _bundle_matches(revision: str) -> bool:
+def _bundle_files() -> list[Path]:
     files = sorted(path for path in Path("site").rglob("*") if path.is_file())
     if not files or any(path.is_symlink() for path in files):
         raise ValueError("site bundle must contain regular files and no symlinks")
+    relative_paths = {path.relative_to("site").as_posix() for path in files}
+    required_paths = {"README.md", "index.html", "style.css", "app.js", *READBACK_FILES}
+    if not required_paths.issubset(relative_paths):
+        missing = sorted(required_paths - relative_paths)
+        raise ValueError(f"site bundle is incomplete; missing={missing}")
+    return files
+
+
+def _canonical_bytes(path: Path) -> bytes:
+    raw = path.read_bytes()
+    if path.suffix.lower() not in TEXT_SUFFIXES:
+        return raw
+    text = raw.decode("utf-8")
+    if "\x00" in text:
+        raise ValueError(f"text bundle file contains a NUL byte: {path}")
+    return text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+
+
+def _bundle_matches(revision: str) -> bool:
+    files = _bundle_files()
     for local_path in files:
         relative = local_path.relative_to("site").as_posix()
-        if _repo_file(relative, revision) != local_path.read_bytes():
+        if _repo_file(relative, revision) != _canonical_bytes(local_path):
             return False
     return True
 
 
+def _materialize_upload_bundle(directory: Path) -> None:
+    for local_path in _bundle_files():
+        relative = local_path.relative_to("site")
+        output = directory / relative
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(_canonical_bytes(local_path))
+
+
 def main() -> int:
-    token = os.environ.get("HF_TOKEN")
-    if not token:
-        print("publisher blocked: HF_TOKEN is unavailable")
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--cached-auth",
+        action="store_true",
+        help="use the local Hugging Face cached login for an attended owner recovery",
+    )
+    args = parser.parse_args()
+
+    environment_token = os.environ.get("HF_TOKEN")
+    if args.cached_auth and environment_token:
+        print("publisher blocked: cached auth and HF_TOKEN cannot be combined")
         return 2
+    credential: str | bool = True if args.cached_auth else (environment_token or False)
 
     from huggingface_hub import HfApi
 
-    api = HfApi(token=token)
-    identity = api.whoami()
-    if identity.get("name") != "betterwithage":
-        print("publisher blocked: credential identity is not betterwithage")
-        return 2
+    api = HfApi(token=credential)
 
     before = api.space_info(TARGET)
     before_sha = str(_field(before, "sha", ""))
@@ -86,22 +140,36 @@ def main() -> int:
         return 2
 
     changed = not _bundle_matches(before_sha)
+    needs_write = changed or _stage(before) != "RUNNING"
+    if needs_write:
+        if not credential:
+            print(
+                "publisher blocked: HF_TOKEN is required because the bundle or runtime needs a write"
+            )
+            return 2
+        identity = api.whoami()
+        if identity.get("name") != "betterwithage":
+            print("publisher blocked: credential identity is not betterwithage")
+            return 2
+
     if changed:
-        commit = api.upload_folder(
-            folder_path="site",
-            path_in_repo="",
-            repo_id=TARGET,
-            repo_type="space",
-            parent_commit=before_sha,
-            commit_message="fix: publish source-bound consolidated bench suite",
-        )
+        with tempfile.TemporaryDirectory(prefix="szl-bench-publisher-") as temporary:
+            _materialize_upload_bundle(Path(temporary))
+            commit = api.upload_folder(
+                folder_path=temporary,
+                path_in_repo="",
+                repo_id=TARGET,
+                repo_type="space",
+                parent_commit=before_sha,
+                commit_message="fix: publish source-bound consolidated bench suite",
+            )
         expected_sha = str(_field(commit, "oid", ""))
         if len(expected_sha) != 40:
             print("publisher blocked: provider did not return an exact commit revision")
             return 2
     else:
         expected_sha = before_sha
-        if _stage(before) != "RUNNING":
+        if needs_write:
             api.restart_space(TARGET)
 
     observed = None
@@ -134,7 +202,8 @@ def main() -> int:
         print("publisher verification failed: target SDK is not static")
         return 3
 
-    status, body_bytes = _fetch("", expected_sha)
+    live_url = _live_url(observed)
+    status, body_bytes = _fetch(live_url, "", expected_sha)
     body = body_bytes.decode("utf-8", "replace")
     if status != 200 or EXPECTED_MARKER not in body:
         print("publisher verification failed: live body identity did not match")
@@ -142,8 +211,8 @@ def main() -> int:
 
     artifact_hashes: dict[str, str] = {}
     for name in READBACK_FILES:
-        artifact_status, live_bytes = _fetch(name, expected_sha)
-        local_bytes = (Path("site") / name).read_bytes()
+        artifact_status, live_bytes = _fetch(live_url, name, expected_sha)
+        local_bytes = _canonical_bytes(Path("site") / name)
         local_hash = hashlib.sha256(local_bytes).hexdigest()
         live_hash = hashlib.sha256(live_bytes).hexdigest()
         if artifact_status != 200 or live_hash != local_hash:
@@ -155,6 +224,7 @@ def main() -> int:
         json.dumps(
             {
                 "after_sha": expected_sha,
+                "authenticated_write": bool(needs_write),
                 "before_sha": before_sha,
                 "changed": changed,
                 "live_http": status,

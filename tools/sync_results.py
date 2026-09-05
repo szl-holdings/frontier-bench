@@ -63,7 +63,7 @@ def main(receipts_dir="receipts", out="site/results.json", expected_plane=None):
         "count": len(rows),
         "results": rows,
     }
-    with open(out, "w", encoding="utf-8") as f:
+    with open(out, "w", encoding="utf-8", newline="\n") as f:
         json.dump(payload, f, indent=2, sort_keys=True)
     print(f"published {len(rows)} measured rows -> {out}")
     return 0
