@@ -4,8 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
-  schedule:
-    - cron: "17 * * * *"
+  # Scheduled publication is intentionally disabled until this repository has
+  # a scoped HF_TOKEN. Pushes and PRs still verify the bundle; manual publish
+  # runs retain the fail-closed credential gate.
   workflow_dispatch:
 
 permissions:
@@ -31,7 +32,7 @@ jobs:
   publish:
     needs: verify
     if: >-
-      github.event_name != 'pull_request' &&
+      github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
