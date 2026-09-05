@@ -48,6 +48,12 @@ def check_receipt(r, i):
 
 
 def verify(paths):
+    try:
+        paths = list(paths)
+    except TypeError:
+        return ["receipt paths must be an iterable collection"], []
+    if not paths:
+        return ["empty receipt chain"], []
     all_errs, measured, prev = [], [], GENESIS
     for i, p in enumerate(paths):
         try:
