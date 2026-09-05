@@ -1,5 +1,10 @@
 # Sovereign deploy — frontier-bench API
 
+The maintained deployment path is now the [bench-plane controller](bench-plane/BENCH_PLANE_OPERATIONS.md).
+It verifies receipt admission, stages all three APIs, checks exact payload identity, and
+witnesses restart before completing. The commands below describe the older single-service
+Compose path; use the controller for new deployments.
+
 Runs on owned hardware (the RTX 4000 Ada bench node). No third-party hosting tier required.
 
 ## Prerequisites
@@ -31,4 +36,5 @@ After new receipts arrive: re-run step 1, then `docker compose -f deploy/docker-
 ## Honesty contract
 
 - /api/results serves only rows exported from hash-chain-verified MEASURED receipts.
-- Missing or unreadable data returns EMPTY_HONEST with count 0 — never an error page, never fabricated numbers.
+- In the controller deployment, missing or unreadable data fails admission. EMPTY_HONEST
+  is reserved for a validated dataset containing zero measured rows.

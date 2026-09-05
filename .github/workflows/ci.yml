@@ -1,5 +1,7 @@
 name: CI
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -8,14 +10,55 @@ jobs:
         python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
       - run: python tests/test_verifier.py
       - run: python tests/test_metrics.py
+      - name: Test the bench-plane controller
+        run: python -I -B deploy/bench-plane/test_finish_bench_plane.py
       - name: End-to-end run against live mock server
         run: |
           python tests/mock_server.py &
           sleep 1
           VLLM_ENDPOINT=http://127.0.0.1:8899 python -m harness.runner --config configs/prompts.json --repeats 2 --out results.json
           python -c "import json; r=json.load(open('results.json'))['results']; m=[x for x in r if x['status']=='MEASURED']; b=[x for x in r if x['status']=='BLOCKED']; assert len(m)==1 and len(b)==5, r; print('E2E OK: 1 MEASURED, 5 BLOCKED')"
+  runtime-smoke:
+    name: Docker evidence API integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Enable attestation-capable image storage on the disposable runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo python3 - <<'PY'
+          import json
+          from pathlib import Path
+          config = Path('/etc/docker/daemon.json')
+          data = json.loads(config.read_text()) if config.exists() else {}
+          data.setdefault('features', {})['containerd-snapshotter'] = True
+          config.parent.mkdir(parents=True, exist_ok=True)
+          config.write_text(json.dumps(data) + '\n')
+          PY
+          sudo systemctl restart docker
+          docker --host unix:///var/run/docker.sock info
+      - name: Build, stage, cut over, and restart EMPTY_HONEST services
+        run: python -I -B deploy/bench-plane/test_bench_docker.py
+      - name: Preserve Docker integration evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bench-docker-integration-${{ github.run_id }}-${{ github.run_attempt }}
+          path: runtime-smoke-evidence.json
+          if-no-files-found: error
+          retention-days: 30
