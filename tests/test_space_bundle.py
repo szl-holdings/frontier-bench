@@ -36,6 +36,14 @@ class SpaceBundleTests(unittest.TestCase):
         self.assertIn("_bundle_matches(before_sha)", publisher)
         self.assertNotIn("SKIPPED: HF_TOKEN", workflow)
 
+    def test_uncredentialed_publisher_has_no_schedule(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "bench.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertNotIn("\n  schedule:", workflow)
+        self.assertIn("github.event_name == 'workflow_dispatch'", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
