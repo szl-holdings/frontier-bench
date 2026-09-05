@@ -183,7 +183,36 @@ class PublisherTests(unittest.TestCase):
         cached.assert_called_once_with()
         preflight.assert_called_once()
         publish.assert_called_once()
-        self.anonymous.assert_not_called()
+        self.anonymous.assert_called_once()
+
+    def test_available_credentials_are_not_resolved_for_identical_healthy_bundle(self) -> None:
+        for token, extra in ((True, []), (False, ["--cached-auth"])):
+            with self.subTest(token_present=token, extra=extra):
+                self.report = self.root / ("environment-report.json" if token else "cached-report.json")
+                cached = Mock(side_effect=AssertionError("no-op must not read cached credentials"))
+                with patch.dict(sys.modules, {"huggingface_hub": SimpleNamespace(get_token=cached)}):
+                    code, report, _, preflight, publish = self.invoke(token=token, extra=extra,
+                        anonymous_outcome={"changed": False, "commit": "a" * 40, "publisher": "ANONYMOUS_READ_ONLY"})
+                self.assertEqual(code, 0)
+                self.assertEqual(report["remote_mutation"], "NO_CHANGE_WITNESSED")
+                cached.assert_not_called()
+                preflight.assert_not_called()
+                publish.assert_not_called()
+                self.anonymous.assert_called_once()
+
+    def test_existing_report_parent_is_never_chmodded(self) -> None:
+        with patch.object(controller.os, "chmod", wraps=os.chmod) as chmod:
+            code, _, _, _, _ = self.invoke()
+        self.assertEqual(code, 0)
+        self.assertNotIn(self.root, [Path(call.args[0]) for call in chmod.call_args_list])
+
+    @unittest.skipIf(os.name == "nt", "POSIX directory permission regression")
+    def test_shared_report_parent_preserves_permissions(self) -> None:
+        self.root.chmod(0o775)
+        code, _, _, _, _ = self.invoke()
+        self.assertEqual(code, 0)
+        self.assertEqual(self.root.stat().st_mode & 0o777, 0o775)
+        self.assertEqual(self.report.stat().st_mode & 0o777, 0o600)
 
     def test_authenticated_provider_host_must_match_reviewed_static_host(self) -> None:
         self.context.api.space_info.return_value = SimpleNamespace(host="https://example.com")

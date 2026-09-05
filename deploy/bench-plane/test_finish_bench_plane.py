@@ -633,12 +633,17 @@ class _FakeHubApi:
         self.commits = 0
         self.omit_commit_id = False
         self.interrupt_commit = False
+        self.restarts = 0
 
     def repo_info(self, **_: object) -> object:
         return types.SimpleNamespace(sha=self.head)
 
     def get_space_runtime(self, **_: object) -> object:
         return types.SimpleNamespace(stage=self.stage)
+
+    def restart_space(self, **_: object) -> object:
+        self.restarts += 1
+        raise AssertionError("the Hub restart API does not support static Spaces")
 
     def list_repo_files(self, *, revision: str, **_: object) -> list[str]:
         return sorted(self.revisions[revision])
@@ -717,6 +722,69 @@ class HubPublicationTests(unittest.TestCase):
         self.assertFalse(result["changed"])
         self.assertEqual(result["final_head_observation"], parent)
         self.assertEqual(api.commits, 0)
+        self.assertEqual(api.restarts, 0)
+
+    def test_unchanged_static_terminal_state_is_explicit_and_never_restarted(self) -> None:
+        parent = "a" * 40
+        payload = b'{"fixture":"stable"}\n'
+        template = (HERE / "szl-bench-suite.index.html").read_bytes()
+        index = bench.finalize_space_index(template, payload)
+        files = {"README.md": (HERE / "szl-bench-suite.README.md").read_bytes(), "index.html": index, "results.json": payload}
+        for stage in ("STOPPED", "PAUSED", "SLEEPING", "BUILD_ERROR", "RUNTIME_ERROR", "CONFIG_ERROR"):
+            with self.subTest(stage=stage):
+                api = _FakeHubApi(parent, files)
+                api.stage = stage
+                with fake_hub(api, lambda *_args, **_kwargs: (b"", {})):
+                    with self.assertRaises(bench.BenchError) as captured:
+                        bench.publish_and_witness(self.context(api, parent, files), payload, provider_timeout=0.1, public_http_deadline=0.1)
+                detail = captured.exception.detail
+                self.assertEqual(detail["state"], "STATIC_RUNTIME_RECOVERY_UNAVAILABLE")
+                self.assertEqual(detail["remote_mutation"], "NO_REMOTE_MUTATION")
+                self.assertEqual(detail["verified_commit"], parent)
+                self.assertEqual(detail["immutable_file_sha256"]["results.json"], bench.sha256_bytes(payload))
+                self.assertEqual(api.commits, 0)
+                self.assertEqual(api.restarts, 0)
+
+    def test_unchanged_static_building_waits_for_running_without_restart(self) -> None:
+        parent = "a" * 40
+        payload = b'{"fixture":"stable"}\n'
+        template = (HERE / "szl-bench-suite.index.html").read_bytes()
+        index = bench.finalize_space_index(template, payload)
+        files = {"README.md": (HERE / "szl-bench-suite.README.md").read_bytes(), "index.html": index, "results.json": payload}
+        api = _FakeHubApi(parent, files)
+        observations = iter(("BUILDING", "BUILDING", "RUNNING", "RUNNING"))
+        api.get_space_runtime = lambda **_: types.SimpleNamespace(stage=next(observations))
+
+        def http_get(url: str, **_: object) -> tuple[bytes, dict[str, str]]:
+            return (payload, {"Content-Type": "application/json"}) if "results.json" in url else (index, {"Content-Type": "text/html"})
+
+        with fake_hub(api, http_get), mock.patch.object(bench.time, "sleep"):
+            result = bench.publish_and_witness(self.context(api, parent, files), payload, provider_timeout=0.1, public_http_deadline=0.1)
+        self.assertFalse(result["changed"])
+        self.assertEqual(result["provider_stage"], "RUNNING")
+        self.assertEqual(api.commits, 0)
+        self.assertEqual(api.restarts, 0)
+
+    def test_unchanged_static_head_drift_after_readback_never_restarts(self) -> None:
+        parent = "a" * 40
+        payload = b'{"fixture":"stable"}\n'
+        template = (HERE / "szl-bench-suite.index.html").read_bytes()
+        index = bench.finalize_space_index(template, payload)
+        files = {"README.md": (HERE / "szl-bench-suite.README.md").read_bytes(), "index.html": index, "results.json": payload}
+        api = _FakeHubApi(parent, files)
+        api.stage = "PAUSED"
+
+        def drift_on_inventory(*, revision: str, **_: object) -> list[str]:
+            api.head = "d" * 40
+            return sorted(api.revisions[revision])
+
+        api.list_repo_files = drift_on_inventory
+        with fake_hub(api, lambda *_args, **_kwargs: (b"", {})):
+            with self.assertRaises(bench.BenchError) as captured:
+                bench.publish_and_witness(self.context(api, parent, files), payload, provider_timeout=0.1, public_http_deadline=0.1)
+        self.assertEqual(captured.exception.detail["state"], "CONCURRENT_HEAD_DRIFT_NO_REMOTE_MUTATION")
+        self.assertEqual(api.commits, 0)
+        self.assertEqual(api.restarts, 0)
 
     def test_stale_parent_aborts_before_remote_mutation(self) -> None:
         parent = "a" * 40

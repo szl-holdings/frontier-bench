@@ -43,6 +43,17 @@ class SpaceBundleTests(unittest.TestCase):
         self.assertNotIn("\n  schedule:", workflow)
         self.assertIn("github.event_name == 'workflow_dispatch'", workflow)
 
+    def test_receipt_key_is_scoped_to_trusted_main_admission(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "bench.yml").read_text(encoding="utf-8")
+        self.assertNotIn("pull_request_target", workflow)
+        audit = workflow.split("- name: Audit reviewed sources and export the public bundle", 1)[1].split("\n  publish:", 1)[0]
+        self.assertIn("if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'", audit)
+        self.assertIn("SZL_BENCH_RECEIPT_HMAC_KEY_HEX: ${{ secrets.SZL_BENCH_RECEIPT_HMAC_KEY_HEX }}", audit)
+        publication = workflow.split("\n  publish:", 1)[1]
+        self.assertIn("github.event_name == 'workflow_dispatch'", publication)
+        self.assertIn("github.ref == 'refs/heads/main'", publication)
+        self.assertEqual(2, publication.count("SZL_BENCH_RECEIPT_HMAC_KEY_HEX: ${{ secrets.SZL_BENCH_RECEIPT_HMAC_KEY_HEX }}"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -166,6 +166,12 @@ failed immutable readback, provider state other than `RUNNING`, or public payloa
 a nonzero failure. A token belonging to any identity other than `betterwithage` is also
 rejected unless the expected identity is deliberately changed.
 
+The pinned Hub client does not support `restart_space` for static Spaces. An unchanged
+static deployment in a terminal stopped/error state reports
+`STATIC_RUNTIME_RECOVERY_UNAVAILABLE` without a write; transient build states are still
+waited on. Provider-side recovery is required in that case. See the
+[Hub restart API contract](https://huggingface.co/docs/huggingface_hub/v1.30.0/en/package_reference/hf_api#huggingface_hub.HfApi.restart_space).
+
 If any repository contains a `MEASURED` receipt, the run additionally requires exactly
 32 random key bytes encoded as 64 hexadecimal characters in the fixed variable
 `SZL_BENCH_RECEIPT_HMAC_KEY_HEX`. Its key ID is fixed to
@@ -196,6 +202,14 @@ direct operator release. Identical, healthy public content can be verified anony
 content and runtime writes require the owner credential. Scheduled publication is disabled
 until a scoped `HF_TOKEN` Actions secret is installed. Manual workflow dispatch remains
 available. The cached personal credential is not copied into CI.
+
+When measured sources are deliberately reviewed and pinned, provision
+`SZL_BENCH_RECEIPT_HMAC_KEY_HEX` as a protected Actions secret for the separately
+controlled producer key. Both trusted-main export and publication re-admission receive
+that key. Pull-request runs receive no receipt key and run fixture-based regression
+tests only; live source admission runs on pushes to main and manual main dispatches.
+This is not pre-merge receipt authentication. Protect main and review the controller
+before provisioning secrets; no branch protection or credential is created by this release.
 
 The active template lives in `deploy/bench-plane/szl-bench-suite.index.html`; the old
 `site` files remain as historical source and are no longer selected by the publisher.

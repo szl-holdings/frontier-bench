@@ -2480,6 +2480,39 @@ def publish_and_witness(
         first_head, first_stage = "", "UNKNOWN"
         while time.monotonic() < deadline:
             first_head, first_stage = head_stage()
+            if not mutated and first_head != context.parent_sha:
+                raise BenchError(
+                    "provider",
+                    "Space head changed while verifying unchanged publication files; no runtime action was attempted",
+                    EXIT_PROVIDER,
+                    detail={
+                        "state": "CONCURRENT_HEAD_DRIFT_NO_REMOTE_MUTATION",
+                        "remote_mutation": "NO_REMOTE_MUTATION",
+                        "captured_parent": context.parent_sha,
+                        "observed_head": first_head,
+                    },
+                )
+            if (
+                not mutated
+                and context.current_sdk == "static"
+                and first_stage in {"STOPPED", "PAUSED", "SLEEPING", "BUILD_ERROR", "RUNTIME_ERROR", "CONFIG_ERROR"}
+            ):
+                # The Hub restart API explicitly rejects static Spaces. A
+                # successful no-op content comparison cannot repair this state.
+                raise BenchError(
+                    "provider",
+                    f"Unchanged static Space is {first_stage}; the provider restart API does not support static Spaces",
+                    EXIT_PROVIDER,
+                    detail={
+                        "state": "STATIC_RUNTIME_RECOVERY_UNAVAILABLE",
+                        "remote_mutation": "NO_REMOTE_MUTATION",
+                        "content_changed": False,
+                        "runtime_repair": "UNAVAILABLE_STATIC_SPACE",
+                        "verified_commit": commit_sha,
+                        "observed_stage": first_stage,
+                        "immutable_file_sha256": immutable_hashes,
+                    },
+                )
             if first_head == commit_sha and first_stage == "RUNNING":
                 break
             time.sleep(min(10.0, max(0.0, deadline - time.monotonic())))

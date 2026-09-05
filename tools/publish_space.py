@@ -197,7 +197,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         controller._reject_link_components(report_path, phase="report", exit_code=controller.EXIT_CLI)
         if report_path.exists():
             raise controller.BenchError("report", "refusing to overwrite an existing publication report", controller.EXIT_CLI)
-        controller.ensure_private_directory(report_path.parent, phase="report", exit_code=controller.EXIT_CLI)
+        # A caller-selected report may live in a shared directory. Protect the
+        # new file, but never chmod existing caller-owned parent directories.
+        report_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        controller._reject_link_components(report_path.parent, phase="report", exit_code=controller.EXIT_CLI)
+        if not report_path.parent.is_dir():
+            raise controller.BenchError("report", "report parent must be a directory", controller.EXIT_CLI)
         controller.atomic_write(report_path, controller.pretty_json_bytes(report))
         report_ready = True
         files, payload = read_bundle(controller, args.bundle_dir)
@@ -213,18 +218,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             previous_token = os.environ.get("HF_TOKEN")
             added_cached_token = False
             try:
-                if not previous_token and args.use_cached_auth:
-                    from huggingface_hub import get_token
-                    cached_token = get_token()
-                    if cached_token:
-                        os.environ["HF_TOKEN"] = cached_token
-                        added_cached_token = True
-                    cached_token = None
-                if not os.environ.get("HF_TOKEN"):
-                    outcome = verify_anonymous_noop(controller, files, run_root)
-                    if outcome is None:
+                # Even when credentials are available, unchanged healthy data
+                # must be witnessed anonymously before resolving write authority.
+                outcome = verify_anonymous_noop(controller, files, run_root)
+                if outcome is None:
+                    if not previous_token and args.use_cached_auth:
+                        from huggingface_hub import get_token
+                        cached_token = get_token()
+                        if cached_token:
+                            os.environ["HF_TOKEN"] = cached_token
+                            added_cached_token = True
+                        cached_token = None
+                    if not os.environ.get("HF_TOKEN"):
                         raise controller.BenchError("hub_auth", "HF_TOKEN is required because the bundle or runtime needs a write; cached login is read only with --use-cached-auth", controller.EXIT_HUB_AUTH)
-                else:
                     hub_args = argparse.Namespace(hf_token_env="HF_TOKEN", expected_hf_user=EXPECTED_USER,
                                                   space_readme=str(args.bundle_dir / "README.md"),
                                                   space_index=str(CONTROLLER_DIR / "szl-bench-suite.index.html"))
