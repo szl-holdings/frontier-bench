@@ -131,7 +131,10 @@ def main() -> int:
 
     from huggingface_hub import HfApi
 
-    read_api = HfApi()
+    # Hugging Face resolves ``token=None`` from HF_TOKEN or the local token
+    # cache. Pass False explicitly so verification reads never carry an
+    # operator credential, even when a later write is authorized.
+    read_api = HfApi(token=False)
 
     before = read_api.space_info(TARGET)
     before_sha = str(_field(before, "sha", ""))
