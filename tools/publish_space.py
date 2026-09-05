@@ -131,9 +131,9 @@ def main() -> int:
 
     from huggingface_hub import HfApi
 
-    api = HfApi(token=credential)
+    read_api = HfApi()
 
-    before = api.space_info(TARGET)
+    before = read_api.space_info(TARGET)
     before_sha = str(_field(before, "sha", ""))
     if len(before_sha) != 40:
         print("publisher blocked: provider did not return an exact pre-write revision")
@@ -141,21 +141,24 @@ def main() -> int:
 
     changed = not _bundle_matches(before_sha)
     needs_write = changed or _stage(before) != "RUNNING"
+    write_api = None
     if needs_write:
         if not credential:
             print(
                 "publisher blocked: HF_TOKEN is required because the bundle or runtime needs a write"
             )
             return 2
-        identity = api.whoami()
+        write_api = HfApi(token=credential)
+        identity = write_api.whoami()
         if identity.get("name") != "betterwithage":
             print("publisher blocked: credential identity is not betterwithage")
             return 2
 
     if changed:
+        assert write_api is not None
         with tempfile.TemporaryDirectory(prefix="szl-bench-publisher-") as temporary:
             _materialize_upload_bundle(Path(temporary))
-            commit = api.upload_folder(
+            commit = write_api.upload_folder(
                 folder_path=temporary,
                 path_in_repo="",
                 repo_id=TARGET,
@@ -170,12 +173,13 @@ def main() -> int:
     else:
         expected_sha = before_sha
         if needs_write:
-            api.restart_space(TARGET)
+            assert write_api is not None
+            write_api.restart_space(TARGET)
 
     observed = None
     deadline = time.monotonic() + 360
     while time.monotonic() < deadline:
-        observed = api.space_info(TARGET)
+        observed = read_api.space_info(TARGET)
         if str(_field(observed, "sha", "")) == expected_sha and _stage(observed) == "RUNNING":
             break
         time.sleep(10)
