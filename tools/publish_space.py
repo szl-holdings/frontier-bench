@@ -13,6 +13,7 @@ import os
 import secrets
 import sys
 import tempfile
+import urllib.parse
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Sequence
@@ -23,6 +24,17 @@ CONTROLLER_PATH = CONTROLLER_DIR / "finish_bench_plane.py"
 TARGET = "betterwithage/szl-bench-suite"
 EXPECTED_USER = "betterwithage"
 BUNDLE_FILES = {"README.md", "index.html", "results.json"}
+ALLOWED_LIVE_HOSTS = {"betterwithage-szl-bench-suite.hf.space", "betterwithage-szl-bench-suite.static.hf.space"}
+
+
+def _live_url(info: Any) -> str:
+    value = str(getattr(info, "host", "")).rstrip("/")
+    parsed = urllib.parse.urlparse(value)
+    if (parsed.scheme != "https" or parsed.hostname not in ALLOWED_LIVE_HOSTS
+            or parsed.username is not None or parsed.password is not None or parsed.port is not None
+            or parsed.path or parsed.params or parsed.query or parsed.fragment):
+        raise ValueError("provider returned an unexpected live host")
+    return value + "/"
 
 
 def load_controller() -> ModuleType:
@@ -110,12 +122,63 @@ def positive_timeout(value: str) -> float:
     return number
 
 
+def verify_anonymous_noop(controller: ModuleType, files: dict[str, bytes], run_root: Path) -> dict[str, Any] | None:
+    """Witness an already-identical public deployment using explicit anonymous reads.
+
+    None means authentication is needed for a changed bundle or runtime. This
+    function has no commit, upload, restart, or other mutation path.
+    """
+    from huggingface_hub import HfApi
+
+    api = HfApi(token=False)
+    before = api.space_info(repo_id=TARGET)
+    before_sha = str(getattr(before, "sha", ""))
+    if getattr(before, "id", TARGET) != TARGET or not controller.COMMIT_RE.fullmatch(before_sha):
+        raise controller.BenchError("anonymous_witness", "provider returned an unexpected Space or revision", controller.EXIT_PROVIDER)
+    live_url = _live_url(before)
+    runtime = api.get_space_runtime(repo_id=TARGET)
+    if bool(getattr(before, "private", True)) or getattr(before, "sdk", "") != "static" or str(getattr(runtime, "stage", "UNKNOWN")) != "RUNNING":
+        return None
+    remote_files = set(api.list_repo_files(repo_id=TARGET, repo_type="space", revision=before_sha))
+    if not BUNDLE_FILES.issubset(remote_files):
+        return None
+    download_root = controller.ensure_private_directory(run_root / "anonymous-downloads", phase="anonymous_witness", exit_code=controller.EXIT_PROVIDER)
+    hashes: dict[str, str] = {}
+    for name, expected in files.items():
+        observed = controller._download_hub_file_strict(TARGET, name, before_sha, False, download_root)
+        if observed != expected:
+            return None
+        hashes[name] = controller.sha256_bytes(observed)
+    public_hashes: dict[str, str] = {}
+    for name, route in (("index.html", ""), ("results.json", "results.json")):
+        observed, headers = controller.http_get_bytes(f"{live_url}{route}?run={before_sha}", timeout=15,
+                                                       max_bytes=controller.MAX_HTTP_BYTES, expect_json=name.endswith(".json"))
+        if name == "index.html" and "text/html" not in str(headers.get("Content-Type", "")).lower():
+            raise controller.BenchError("anonymous_witness", "public index has the wrong content type", controller.EXIT_PROVIDER)
+        if observed != files[name]:
+            raise controller.BenchError("anonymous_witness", f"public {name} differs from the verified bundle", controller.EXIT_PROVIDER)
+        public_hashes[name] = controller.sha256_bytes(observed)
+    after = api.space_info(repo_id=TARGET)
+    after_runtime = api.get_space_runtime(repo_id=TARGET)
+    if (str(getattr(after, "sha", "")) != before_sha or str(getattr(after_runtime, "stage", "UNKNOWN")) != "RUNNING"
+            or bool(getattr(after, "private", True)) or getattr(after, "sdk", "") != "static" or _live_url(after) != live_url):
+        raise controller.BenchError("anonymous_witness", "Space head, host, or runtime changed during the public witness", controller.EXIT_PROVIDER)
+    return {
+        "space": TARGET, "space_url": live_url, "publisher": "ANONYMOUS_READ_ONLY",
+        "parent_commit": before_sha, "commit": before_sha, "changed": False,
+        "authenticated_write": False, "provider_stage": "RUNNING",
+        "immutable_readback_sha256": hashes["results.json"], "immutable_index_sha256": hashes["index.html"],
+        "immutable_readme_sha256": hashes["README.md"], "public_results_sha256": public_hashes["results.json"],
+        "public_index_sha256": public_hashes["index.html"],
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle-dir", type=Path, required=True, help="directory exported by the reviewed controller audit")
     parser.add_argument("--git-bin", help="optional absolute trusted Git executable path")
     parser.add_argument("--report", type=Path, help="new local JSON report path; defaults to .bench-plane-publish/<run-id>.json")
-    parser.add_argument("--use-cached-auth", action="store_true", help="explicitly permit reading the local Hugging Face login token in this process")
+    parser.add_argument("--use-cached-auth", "--cached-auth", dest="use_cached_auth", action="store_true", help="explicitly permit reading the local Hugging Face login token in this process")
     parser.add_argument("--provider-timeout", type=positive_timeout, default=600.0)
     parser.add_argument("--public-http-deadline", type=positive_timeout, default=180.0)
     args = parser.parse_args(argv)
@@ -158,18 +221,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                         added_cached_token = True
                     cached_token = None
                 if not os.environ.get("HF_TOKEN"):
-                    raise controller.BenchError("hub_auth", "HF_TOKEN is unavailable; cached login is read only with --use-cached-auth", controller.EXIT_HUB_AUTH)
-                hub_args = argparse.Namespace(hf_token_env="HF_TOKEN", expected_hf_user=EXPECTED_USER,
-                                              space_readme=str(args.bundle_dir / "README.md"),
-                                              space_index=str(CONTROLLER_DIR / "szl-bench-suite.index.html"))
-                context = controller.hub_preflight(hub_args, run_root / "hub-downloads")
-                if context.readme_bytes != files["README.md"] or controller.finalize_space_index(context.index_template_bytes, files["results.json"]) != files["index.html"]:
-                    raise controller.BenchError("bundle_admission", "publication assets changed after initial admission", controller.EXIT_RESULT)
-                report["remote_mutation"] = "ATTEMPT_IN_PROGRESS"
-                controller.atomic_write(report_path, controller.pretty_json_bytes(report))
-                outcome = controller.publish_and_witness(context, files["results.json"],
-                                                         provider_timeout=args.provider_timeout,
-                                                         public_http_deadline=args.public_http_deadline)
+                    outcome = verify_anonymous_noop(controller, files, run_root)
+                    if outcome is None:
+                        raise controller.BenchError("hub_auth", "HF_TOKEN is required because the bundle or runtime needs a write; cached login is read only with --use-cached-auth", controller.EXIT_HUB_AUTH)
+                else:
+                    hub_args = argparse.Namespace(hf_token_env="HF_TOKEN", expected_hf_user=EXPECTED_USER,
+                                                  space_readme=str(args.bundle_dir / "README.md"),
+                                                  space_index=str(CONTROLLER_DIR / "szl-bench-suite.index.html"))
+                    context = controller.hub_preflight(hub_args, run_root / "hub-downloads")
+                    advertised_url = _live_url(context.api.space_info(repo_id=TARGET))
+                    if advertised_url.rstrip("/") != controller.SPACE_URL.rstrip("/"):
+                        raise controller.BenchError("hub_auth", "provider host differs from the reviewed controller's static host", controller.EXIT_HUB_AUTH)
+                    if context.readme_bytes != files["README.md"] or controller.finalize_space_index(context.index_template_bytes, files["results.json"]) != files["index.html"]:
+                        raise controller.BenchError("bundle_admission", "publication assets changed after initial admission", controller.EXIT_RESULT)
+                    report["remote_mutation"] = "ATTEMPT_IN_PROGRESS"
+                    controller.atomic_write(report_path, controller.pretty_json_bytes(report))
+                    outcome = controller.publish_and_witness(context, files["results.json"],
+                                                             provider_timeout=args.provider_timeout,
+                                                             public_http_deadline=args.public_http_deadline)
                 report["publication"] = outcome
                 report["remote_mutation"] = "COMMIT_WITNESSED" if outcome["changed"] else "NO_CHANGE_WITNESSED"
             finally:

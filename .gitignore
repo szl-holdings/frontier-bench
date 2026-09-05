@@ -6,3 +6,5 @@ build/
 *.egg-info/
 .bench-plane-publish/
 runtime-smoke-evidence.json
+site/results.json
+site/deployment.json

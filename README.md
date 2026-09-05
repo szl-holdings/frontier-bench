@@ -26,6 +26,9 @@ Git objects without executing producer code, verifies all three receipt chains, 
 authentication for measured rows, and exports one digest-bound static bundle.
 The canonical publisher repeats receipt admission before committing and verifies immutable
 files, provider state, and exact public bytes. See the [operations guide](deploy/bench-plane/BENCH_PLANE_OPERATIONS.md).
+An unchanged healthy public bundle is verified without a provider credential; any
+content or runtime write fails closed unless the owner credential is available.
+Scheduled publication stays disabled until a scoped repository credential is installed.
 
 ## Status
 

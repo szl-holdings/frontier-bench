@@ -60,7 +60,8 @@ cannot disable them.
   or byte-mismatched data is shown as `UNAVAILABLE`, not as an honest empty set;
   unsupported “IN CODE” claims were
   removed.
-- `bench-plane-audit.json` — fresh read-only audit evidence from this machine.
+- Local audit reports are generated under the selected work directory; workstation
+  paths and machine inventories are not committed to this package.
 
 ## Validated here
 
@@ -97,7 +98,8 @@ authenticated as betterwithage through its existing cache; `HF_TOKEN` remains ab
 ## Run on the dedicated node
 
 Use a dedicated Linux node with Python 3.11 or newer, system-installed Git and Docker,
-Docker BuildKit, a root-owned local `/var/run/docker.sock`, the NVIDIA driver/`nvidia-smi`,
+Docker BuildKit with the containerd image store enabled (required to retain build
+attestations), a root-owned local `/var/run/docker.sock`, the NVIDIA driver/`nvidia-smi`,
 and enough disk space for three images. Keep this package together. Windows can
 run `--audit-only`; it cannot deploy.
 
@@ -181,7 +183,7 @@ primitive is required for true pre-publication runtime validation.
 
 ### Canonical static publication
 
-`frontier-bench` is the sole scheduled publisher. Its workflow now uses the reviewed
+`frontier-bench` is the sole canonical publisher. Its workflow now uses the reviewed
 controller to export `README.md`, `index.html`, and `results.json` with
 `--audit-only --export-space-bundle DIRECTORY`. The new export directory must be inside
 the dedicated work directory. This path requires both reviewed Space assets and makes
@@ -189,9 +191,11 @@ no Docker or Hugging Face changes.
 
 `tools/publish_space.py --bundle-dir DIRECTORY` independently verifies the source receipts
 again, compares the exact exported bytes, and performs the provider commit/readback.
-`--use-cached-auth` explicitly uses an existing local login for a direct operator release.
-The scheduled workflow uses only its scoped `HF_TOKEN` Actions secret. The cached personal
-credential is not copied into CI.
+`--use-cached-auth` (also `--cached-auth`) explicitly uses an existing local login for a
+direct operator release. Identical, healthy public content can be verified anonymously;
+content and runtime writes require the owner credential. Scheduled publication is disabled
+until a scoped `HF_TOKEN` Actions secret is installed. Manual workflow dispatch remains
+available. The cached personal credential is not copied into CI.
 
 The active template lives in `deploy/bench-plane/szl-bench-suite.index.html`; the old
 `site` files remain as historical source and are no longer selected by the publisher.
@@ -227,7 +231,7 @@ The refreshed live inventory on 2026-09-05 is:
 | Layer | Current state |
 |---|---|
 | Display source | Public reviewed revisions pinned by the controller; current commits have GitHub-verified signatures |
-| GitHub CI | All six display/harness test suites pass; canonical publisher fails for a missing scoped Actions credential |
+| GitHub CI before this release | All six display/harness test suites pass; a prior publisher run failed for a missing scoped Actions credential; upstream suspended scheduled publication |
 | Branch protection | All six display/harness `main` branches are currently unprotected |
 | Receipt chains | Three valid, unsigned integrity chains; each contains only its `BLOCKED` genesis |
 | Receipt producer | No repository currently writes the flat display receipt schema end to end |

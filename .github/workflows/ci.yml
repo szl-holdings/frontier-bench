@@ -35,6 +35,22 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+      - name: Enable attestation-capable image storage on the disposable runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo python3 - <<'PY'
+          import json
+          from pathlib import Path
+          config = Path('/etc/docker/daemon.json')
+          data = json.loads(config.read_text()) if config.exists() else {}
+          data.setdefault('features', {})['containerd-snapshotter'] = True
+          config.parent.mkdir(parents=True, exist_ok=True)
+          config.write_text(json.dumps(data) + '\n')
+          PY
+          sudo systemctl restart docker
+          docker --host unix:///var/run/docker.sock info
       - name: Build, stage, cut over, and restart EMPTY_HONEST services
         run: python -I -B deploy/bench-plane/test_bench_docker.py
       - name: Preserve Docker integration evidence

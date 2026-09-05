@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import tempfile
 import unittest
@@ -56,6 +57,10 @@ class SyncResultsTests(unittest.TestCase):
         self.assertEqual(0, payload["count"])
         self.assertEqual([], payload["results"])
         self.assertEqual("2026-09-04T00:00:00Z", payload["generated_at"])
+        self.assertEqual(
+            "3a5d18bda9ddb69c49bb330c777ef266246f92d13f3f34f85dd8c5536d5b3128",
+            hashlib.sha256(self.output.read_bytes()).hexdigest(),
+        )
 
 
 if __name__ == "__main__":

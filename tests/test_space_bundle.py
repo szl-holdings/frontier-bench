@@ -32,7 +32,16 @@ class SpaceBundleTests(unittest.TestCase):
         self.assertIn("--export-space-bundle", workflow)
         self.assertIn("--bundle-dir", workflow)
         self.assertNotIn("python tools/sync_results.py", workflow)
+        self.assertNotIn("Require the scoped provider credential", workflow)
         self.assertNotIn("SKIPPED: HF_TOKEN", workflow)
+
+    def test_uncredentialed_publisher_has_no_schedule(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "bench.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertNotIn("\n  schedule:", workflow)
+        self.assertIn("github.event_name == 'workflow_dispatch'", workflow)
 
 
 if __name__ == "__main__":
