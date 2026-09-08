@@ -102,6 +102,39 @@ class PublisherTests(unittest.TestCase):
         preflight.assert_not_called()
         publish.assert_not_called()
 
+    def test_large_results_bundle_keeps_strict_parsing_and_fresh_readmission(self) -> None:
+        canonical = self.payload
+        self.payload += b" " * (controller.MAX_JSON_BYTES - len(self.payload) + 1)
+        self.assertLessEqual(len(self.payload), controller.MAX_HTTP_BYTES)
+        self.write_bundle()
+        files, parsed = publisher.read_bundle(controller, self.bundle)
+        self.assertEqual(parsed, payload_fixture())
+        self.assertEqual(files["results.json"], self.payload)
+        # The receipt parser's default ceiling is deliberately unchanged.
+        with self.assertRaises(controller.BenchError):
+            controller.strict_json_from_bytes(self.payload, source="receipt.json")
+        # Parsing a valid larger JSON document must not bypass canonical source
+        # re-admission: these padded bytes still differ from the real export.
+        code, report, readmit, preflight, publish = self.invoke(expected=canonical)
+        self.assertEqual(code, controller.EXIT_RESULT)
+        self.assertEqual(report["failure"]["phase"], "bundle_admission")
+        readmit.assert_called_once()
+        preflight.assert_not_called()
+        publish.assert_not_called()
+
+    def test_over_http_limit_results_fail_before_parsing(self) -> None:
+        self.payload += b" " * (controller.MAX_HTTP_BYTES - len(self.payload) + 1)
+        self.write_bundle()
+        with patch.object(controller, "strict_json_from_bytes") as parser:
+            with self.assertRaises(controller.BenchError):
+                publisher.read_bundle(controller, self.bundle)
+        parser.assert_not_called()
+
+    def test_bundle_parser_retains_all_strict_json_guards(self) -> None:
+        for data in (b'{"a":1,"a":2}', b'{"a":NaN}', b'[' * (controller.MAX_JSON_DEPTH + 2) + b'0' + b']' * (controller.MAX_JSON_DEPTH + 2)):
+            with self.subTest(data=data[:32]), self.assertRaises(controller.BenchError):
+                controller.strict_json_from_bytes(data, source="bundle/results.json", max_bytes=controller.MAX_HTTP_BYTES)
+
     def test_changed_readme_aborts_before_provider(self) -> None:
         (self.bundle / "README.md").write_bytes(b"---\nsdk: static\n---\nunreviewed")
         code, _, _, preflight, publish = self.invoke()
