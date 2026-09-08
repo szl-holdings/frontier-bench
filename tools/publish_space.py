@@ -165,7 +165,8 @@ def verify_anonymous_noop(controller: ModuleType, files: dict[str, bytes], run_r
             or bool(getattr(after, "private", True)) or getattr(after, "sdk", "") != "static" or _live_url(after) != live_url):
         raise controller.BenchError("anonymous_witness", "Space head, host, or runtime changed during the public witness", controller.EXIT_PROVIDER)
     return {
-        "space": TARGET, "space_url": live_url, "publisher": "ANONYMOUS_READ_ONLY",
+        "space": TARGET, "space_url": f"{live_url}index.html", "publisher": "ANONYMOUS_READ_ONLY",
+        "public_index_url": f"{live_url}index.html?run={before_sha}",
         "parent_commit": before_sha, "commit": before_sha, "changed": False,
         "authenticated_write": False, "provider_stage": "RUNNING",
         "immutable_readback_sha256": hashes["results.json"], "immutable_index_sha256": hashes["index.html"],
@@ -188,7 +189,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     report_path = Path(os.path.abspath((args.report or Path.cwd() / ".bench-plane-publish" / f"{run_id}.json").expanduser()))
     report: dict[str, Any] = {
         "schema_version": "szl-static-bench-publication/v1", "run_id": run_id,
-        "started_at": controller.utc_now(), "target": TARGET, "space_url": controller.SPACE_URL,
+        "started_at": controller.utc_now(), "target": TARGET, "space_url": f"{controller.SPACE_URL}/index.html",
         "controller_sha256": controller.sha256_file(CONTROLLER_PATH),
         "state": "IN_PROGRESS", "remote_mutation": "NOT_ATTEMPTED",
         "measurements": "NOT_PERFORMED_BY_PUBLISHER", "local_runtime": "NOT_REQUESTED",

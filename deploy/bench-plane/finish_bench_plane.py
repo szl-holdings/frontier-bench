@@ -2565,7 +2565,8 @@ def publish_and_witness(
         raise
     return {
         "space": SPACE_ID,
-        "space_url": SPACE_URL,
+        "space_url": f"{SPACE_URL}/index.html",
+        "public_index_url": f"{SPACE_URL}/index.html?run={commit_sha}",
         "publisher": context.username,
         "parent_commit": context.parent_sha,
         "commit": commit_sha,

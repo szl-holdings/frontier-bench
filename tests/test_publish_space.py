@@ -83,6 +83,7 @@ class PublisherTests(unittest.TestCase):
         code, report, readmit, preflight, publish = self.invoke()
         self.assertEqual(code, 0)
         self.assertEqual(report["state"], "PUBLISHED_EVIDENCE_SURFACE_OPERATIONAL")
+        self.assertEqual(report["space_url"], f"{controller.SPACE_URL}/index.html")
         self.assertEqual(report["measurements"], "NOT_PERFORMED_BY_PUBLISHER")
         readmit.assert_called_once()
         preflight.assert_called_once()
@@ -321,6 +322,8 @@ class AnonymousWitnessTests(unittest.TestCase):
         self.assertFalse(outcome["changed"])
         self.assertFalse(outcome["authenticated_write"])
         self.assertEqual(outcome["publisher"], "ANONYMOUS_READ_ONLY")
+        self.assertEqual(outcome["space_url"], f"{controller.SPACE_URL}/index.html")
+        self.assertEqual(outcome["public_index_url"], f"{controller.SPACE_URL}/index.html?run={'a' * 40}")
         self.assertEqual(self.api.space_info.call_count, 2)
         self.assertEqual(self.api.get_space_runtime.call_count, 2)
 

@@ -748,6 +748,8 @@ class HubPublicationTests(unittest.TestCase):
             result = bench.publish_and_witness(self.context(api, parent, files), payload, provider_timeout=0.1, public_http_deadline=0.1)
         self.assertFalse(result["changed"])
         self.assertEqual(result["final_head_observation"], parent)
+        self.assertEqual(result["space_url"], f"{bench.SPACE_URL}/index.html")
+        self.assertEqual(result["public_index_url"], f"{bench.SPACE_URL}/index.html?run={parent}")
         self.assertEqual(api.commits, 0)
         self.assertEqual(api.restarts, 0)
 
