@@ -2530,7 +2530,7 @@ def publish_and_witness(
                 public_bytes, _ = http_get_bytes(
                     f"{SPACE_URL}/results.json?run={commit_sha}", timeout=10, max_bytes=MAX_HTTP_BYTES, expect_json=True
                 )
-                public_index, index_headers = http_get_bytes(f"{SPACE_URL}/?run={commit_sha}", timeout=15, max_bytes=MAX_HTTP_BYTES)
+                public_index, index_headers = http_get_bytes(f"{SPACE_URL}/index.html?run={commit_sha}", timeout=15, max_bytes=MAX_HTTP_BYTES)
                 if "text/html" not in str(index_headers.get("Content-Type", "")).lower():
                     raise BenchError("public_runtime", "public index has the wrong content type", EXIT_PROVIDER)
                 if not hmac.compare_digest(sha256_bytes(public_bytes), sha256_bytes(payload_bytes)):

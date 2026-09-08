@@ -301,6 +301,7 @@ class AnonymousWitnessTests(unittest.TestCase):
 
         def http(url, **_kwargs):
             name = "results.json" if "/results.json?" in url else "index.html"
+            self.assertEqual(url, f"{controller.SPACE_URL}/{name}?run={'a' * 40}")
             return public[name], {"Content-Type": "application/json" if name.endswith(".json") else "text/html"}
 
         with patch.dict(sys.modules, {"huggingface_hub": SimpleNamespace(HfApi=self.factory)}), \

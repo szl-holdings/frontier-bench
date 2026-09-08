@@ -577,6 +577,31 @@ class _ApiHandler(BaseHTTPRequestHandler):
 
 
 class HttpWitnessTests(unittest.TestCase):
+    def test_public_witness_does_not_follow_redirects(self) -> None:
+        paths = []
+
+        class RedirectHandler(BaseHTTPRequestHandler):
+            def log_message(self, *_args: object) -> None:
+                pass
+
+            def do_GET(self) -> None:
+                paths.append(self.path)
+                self.send_response(302)
+                self.send_header("Location", "/index.html")
+                self.end_headers()
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with self.assertRaisesRegex(bench.BenchError, "redirects are forbidden"):
+                bench.http_get_bytes(f"http://127.0.0.1:{server.server_address[1]}/", timeout=2, max_bytes=1024)
+            self.assertEqual(paths, ["/"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
     def test_service_witness_binds_exact_payload(self) -> None:
         expected = {
             "generated_at": "2026-09-04T02:15:00Z",
@@ -715,6 +740,8 @@ class HubPublicationTests(unittest.TestCase):
         api = _FakeHubApi(parent, files)
 
         def http_get(url: str, **_: object) -> tuple[bytes, dict[str, str]]:
+            name = "results.json" if "results.json" in url else "index.html"
+            self.assertEqual(url, f"{bench.SPACE_URL}/{name}?run={parent}")
             return (payload, {"Content-Type": "application/json"}) if "results.json" in url else (index, {"Content-Type": "text/html"})
 
         with fake_hub(api, http_get):

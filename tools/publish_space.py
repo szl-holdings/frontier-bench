@@ -151,7 +151,7 @@ def verify_anonymous_noop(controller: ModuleType, files: dict[str, bytes], run_r
             return None
         hashes[name] = controller.sha256_bytes(observed)
     public_hashes: dict[str, str] = {}
-    for name, route in (("index.html", ""), ("results.json", "results.json")):
+    for name, route in (("index.html", "index.html"), ("results.json", "results.json")):
         observed, headers = controller.http_get_bytes(f"{live_url}{route}?run={before_sha}", timeout=15,
                                                        max_bytes=controller.MAX_HTTP_BYTES, expect_json=name.endswith(".json"))
         if name == "index.html" and "text/html" not in str(headers.get("Content-Type", "")).lower():
