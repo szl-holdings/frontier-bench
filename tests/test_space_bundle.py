@@ -35,13 +35,16 @@ class SpaceBundleTests(unittest.TestCase):
         self.assertNotIn("Require the scoped provider credential", workflow)
         self.assertNotIn("SKIPPED: HF_TOKEN", workflow)
 
-    def test_uncredentialed_publisher_has_no_schedule(self) -> None:
+    def test_publisher_runs_on_main_and_weekly_but_never_on_pull_requests(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "bench.yml").read_text(
             encoding="utf-8"
         )
         self.assertIn("workflow_dispatch:", workflow)
-        self.assertNotIn("\n  schedule:", workflow)
-        self.assertIn("github.event_name == 'workflow_dispatch'", workflow)
+        self.assertIn("\n  schedule:", workflow)
+        self.assertIn('cron: "17 6 * * 1"', workflow)
+        publication = workflow.split("\n  publish:", 1)[1]
+        self.assertIn("github.event_name != 'pull_request'", publication)
+        self.assertIn("github.ref == 'refs/heads/main'", publication)
 
     def test_receipt_key_is_scoped_to_trusted_main_admission(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "bench.yml").read_text(encoding="utf-8")
@@ -50,7 +53,7 @@ class SpaceBundleTests(unittest.TestCase):
         self.assertIn("if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'", audit)
         self.assertIn("SZL_BENCH_RECEIPT_HMAC_KEY_HEX: ${{ secrets.SZL_BENCH_RECEIPT_HMAC_KEY_HEX }}", audit)
         publication = workflow.split("\n  publish:", 1)[1]
-        self.assertIn("github.event_name == 'workflow_dispatch'", publication)
+        self.assertIn("github.event_name != 'pull_request'", publication)
         self.assertIn("github.ref == 'refs/heads/main'", publication)
         self.assertEqual(2, publication.count("SZL_BENCH_RECEIPT_HMAC_KEY_HEX: ${{ secrets.SZL_BENCH_RECEIPT_HMAC_KEY_HEX }}"))
 

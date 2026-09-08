@@ -577,6 +577,31 @@ class _ApiHandler(BaseHTTPRequestHandler):
 
 
 class HttpWitnessTests(unittest.TestCase):
+    def test_public_witness_does_not_follow_redirects(self) -> None:
+        paths = []
+
+        class RedirectHandler(BaseHTTPRequestHandler):
+            def log_message(self, *_args: object) -> None:
+                pass
+
+            def do_GET(self) -> None:
+                paths.append(self.path)
+                self.send_response(302)
+                self.send_header("Location", "/index.html")
+                self.end_headers()
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with self.assertRaisesRegex(bench.BenchError, "redirects are forbidden"):
+                bench.http_get_bytes(f"http://127.0.0.1:{server.server_address[1]}/", timeout=2, max_bytes=1024)
+            self.assertEqual(paths, ["/"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
     def test_service_witness_binds_exact_payload(self) -> None:
         expected = {
             "generated_at": "2026-09-04T02:15:00Z",
@@ -691,6 +716,64 @@ def fake_hub(api: _FakeHubApi, http_get: object):
             sys.modules["huggingface_hub"] = original_module
 
 
+class StaticIndexWitnessTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.expected = b"<!doctype html><html><head><title>Bench</title></head><body>verified</body></html>"
+        self.valid_injection = (
+            bench.HF_STATIC_INDEX_INJECTION_PREFIX
+            + bench.canonical_json_bytes({"SPACE_CREATOR_USER_ID": bench.HF_STATIC_CREATOR_USER_ID})
+            + bench.HF_STATIC_INDEX_INJECTION_SUFFIX
+        )
+
+    def inject(self, insertion: bytes, *, expected: bytes | None = None) -> bytes:
+        source = self.expected if expected is None else expected
+        offset = source.index(b"<head>") + len(b"<head>")
+        return source[:offset] + insertion + source[offset:]
+
+    def test_exact_index_bytes_need_no_normalization(self) -> None:
+        evidence = bench.verify_live_static_index(self.expected, self.expected)
+        self.assertEqual(evidence["transform"], "NONE_EXACT_BYTES")
+        self.assertIsNone(evidence["injection_sha256"])
+        self.assertEqual(evidence["raw_sha256"], bench.sha256_bytes(self.expected))
+        self.assertEqual(evidence["normalized_sha256"], bench.sha256_bytes(self.expected))
+
+    def test_exact_reviewed_hf_static_injection_is_normalized(self) -> None:
+        observed = self.inject(self.valid_injection)
+        evidence = bench.verify_live_static_index(self.expected, observed)
+        self.assertEqual(evidence["transform"], "HF_STATIC_CREATOR_METADATA_V1")
+        self.assertEqual(evidence["raw_sha256"], bench.sha256_bytes(observed))
+        self.assertEqual(evidence["normalized_sha256"], bench.sha256_bytes(self.expected))
+        self.assertEqual(evidence["injection_sha256"], bench.sha256_bytes(self.valid_injection))
+
+    def test_unreviewed_static_index_changes_fail_closed(self) -> None:
+        bad_variables = (
+            b'{"SPACE_CREATOR_USER_ID":"000000000000000000000000"}',
+            b'{"EXTRA":"value","SPACE_CREATOR_USER_ID":"' + bench.HF_STATIC_CREATOR_USER_ID.encode("ascii") + b'"}',
+            b'{"SPACE_CREATOR_USER_ID":"' + bench.HF_STATIC_CREATOR_USER_ID.encode("ascii")
+            + b'","SPACE_CREATOR_USER_ID":"' + bench.HF_STATIC_CREATOR_USER_ID.encode("ascii") + b'"}',
+            b'\xff',
+        )
+        cases = [
+            self.inject(bench.HF_STATIC_INDEX_INJECTION_PREFIX + variables + bench.HF_STATIC_INDEX_INJECTION_SUFFIX)
+            for variables in bad_variables
+        ]
+        cases.extend((
+            self.expected.replace(b"<body>", b"<body>" + self.valid_injection, 1),
+            self.inject(b"x" * (bench.MAX_HF_STATIC_INDEX_INJECTION_BYTES + 1)),
+            self.inject(self.valid_injection) + b"<!-- altered -->",
+        ))
+        for observed in cases:
+            with self.subTest(observed=observed[:120]), self.assertRaises(bench.BenchError):
+                bench.verify_live_static_index(self.expected, observed)
+
+    def test_revision_header_is_required_exactly_once(self) -> None:
+        revision = "a" * 40
+        self.assertEqual(bench.require_live_revision_header({"X-Repo-Commit": revision}, revision), revision)
+        for headers in ({}, {"x-repo-commit": "b" * 40}):
+            with self.subTest(headers=headers), self.assertRaises(bench.BenchError):
+                bench.require_live_revision_header(headers, revision)
+
+
 class HubPublicationTests(unittest.TestCase):
     def context(self, api: _FakeHubApi, parent: str, files: dict[str, bytes]) -> bench.HubContext:
         return bench.HubContext(
@@ -713,14 +796,30 @@ class HubPublicationTests(unittest.TestCase):
         index = bench.finalize_space_index(template, payload)
         files = {"README.md": (HERE / "szl-bench-suite.README.md").read_bytes(), "index.html": index, "results.json": payload}
         api = _FakeHubApi(parent, files)
+        injection = (
+            bench.HF_STATIC_INDEX_INJECTION_PREFIX
+            + bench.canonical_json_bytes({"SPACE_CREATOR_USER_ID": bench.HF_STATIC_CREATOR_USER_ID})
+            + bench.HF_STATIC_INDEX_INJECTION_SUFFIX
+        )
+        public_index = index.replace(b"<head>", b"<head>" + injection, 1)
 
         def http_get(url: str, **_: object) -> tuple[bytes, dict[str, str]]:
-            return (payload, {"Content-Type": "application/json"}) if "results.json" in url else (index, {"Content-Type": "text/html"})
+            name = "results.json" if "results.json" in url else "index.html"
+            self.assertEqual(url, f"{bench.SPACE_URL}/{name}?run={parent}")
+            headers = {"Content-Type": "application/json" if name == "results.json" else "text/html"}
+            if name == "results.json":
+                headers["X-Repo-Commit"] = parent
+            return (payload, headers) if name == "results.json" else (public_index, headers)
 
         with fake_hub(api, http_get):
             result = bench.publish_and_witness(self.context(api, parent, files), payload, provider_timeout=0.1, public_http_deadline=0.1)
         self.assertFalse(result["changed"])
         self.assertEqual(result["final_head_observation"], parent)
+        self.assertEqual(result["space_url"], f"{bench.SPACE_URL}/index.html")
+        self.assertEqual(result["public_index_url"], f"{bench.SPACE_URL}/index.html?run={parent}")
+        self.assertEqual(result["public_index_transform"], "HF_STATIC_CREATOR_METADATA_V1")
+        self.assertEqual(result["public_index_normalized_sha256"], bench.sha256_bytes(index))
+        self.assertEqual(result["public_index_sha256"], bench.sha256_bytes(public_index))
         self.assertEqual(api.commits, 0)
         self.assertEqual(api.restarts, 0)
 
@@ -756,7 +855,10 @@ class HubPublicationTests(unittest.TestCase):
         api.get_space_runtime = lambda **_: types.SimpleNamespace(stage=next(observations))
 
         def http_get(url: str, **_: object) -> tuple[bytes, dict[str, str]]:
-            return (payload, {"Content-Type": "application/json"}) if "results.json" in url else (index, {"Content-Type": "text/html"})
+            headers = {"Content-Type": "application/json" if "results.json" in url else "text/html"}
+            if "results.json" in url:
+                headers["X-Repo-Commit"] = parent
+            return (payload, headers) if "results.json" in url else (index, headers)
 
         with fake_hub(api, http_get), mock.patch.object(bench.time, "sleep"):
             result = bench.publish_and_witness(self.context(api, parent, files), payload, provider_timeout=0.1, public_http_deadline=0.1)
@@ -818,7 +920,8 @@ class HubPublicationTests(unittest.TestCase):
         api = _FakeHubApi(parent, files)
 
         def wrong_http(url: str, **_: object) -> tuple[bytes, dict[str, str]]:
-            return (b"wrong", {"Content-Type": "application/json"}) if "results.json" in url else (b"wrong", {"Content-Type": "text/html"})
+            headers = {"Content-Type": "application/json" if "results.json" in url else "text/html", "X-Repo-Commit": parent}
+            return b"wrong", headers
 
         with fake_hub(api, wrong_http):
             with self.assertRaises(bench.BenchError) as captured:

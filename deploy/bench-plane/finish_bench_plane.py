@@ -88,6 +88,10 @@ RECEIPT_KEY_ID = "szl-bench-node-hmac-v1"
 RECEIPT_KEY_ENV = "SZL_BENCH_RECEIPT_HMAC_KEY_HEX"
 RECEIPT_DOMAIN = b"SZL-BENCH-RECEIPT-V3\0"
 RESULT_DIGEST_PLACEHOLDER = "__RESULTS_JSON_SHA256__"
+HF_STATIC_INDEX_INJECTION_PREFIX = b"<script>window.huggingface={variables:"
+HF_STATIC_INDEX_INJECTION_SUFFIX = b"};</script>"
+HF_STATIC_CREATOR_USER_ID = "69ec7d565e5561c3b16baba8"
+MAX_HF_STATIC_INDEX_INJECTION_BYTES = 512
 # Updated deliberately whenever either reviewed publication asset changes.
 SPACE_README_SHA256 = "c3d6f9c45e81db69dacd79dab23c0fa2b67abea0a0d22b23f051c4ca0ab347e9"
 SPACE_INDEX_TEMPLATE_SHA256 = "45d8fb2f202075b9c6093fc3c8e4cc6433d6c9033c1b38fba1dcf59bd9f1b309"
@@ -2337,6 +2341,77 @@ def _download_hub_file_strict(
         raise BenchError("hub_readback", f"could not read {filename} at immutable revision {revision}: {redact(exc)}", EXIT_HUB_READBACK) from exc
 
 
+def verify_live_static_index(
+    expected: bytes,
+    observed: bytes,
+    *,
+    phase: str = "public_runtime",
+    exit_code: int = EXIT_PROVIDER,
+) -> dict[str, str | None]:
+    """Verify exact bytes or the one reviewed Hugging Face static transform."""
+    expected_sha256 = sha256_bytes(expected)
+    observed_sha256 = sha256_bytes(observed)
+    if hmac.compare_digest(expected, observed):
+        return {
+            "transform": "NONE_EXACT_BYTES",
+            "raw_sha256": observed_sha256,
+            "normalized_sha256": expected_sha256,
+            "injection_sha256": None,
+        }
+
+    marker = b"<head>"
+    if expected.count(marker) != 1:
+        raise BenchError(phase, "reviewed index must contain exactly one literal <head> marker", exit_code)
+    insertion_offset = expected.index(marker) + len(marker)
+    insertion_size = len(observed) - len(expected)
+    if not 0 < insertion_size <= MAX_HF_STATIC_INDEX_INJECTION_BYTES:
+        raise BenchError(phase, "public index differs outside the bounded static-provider transform", exit_code)
+    injection = observed[insertion_offset:insertion_offset + insertion_size]
+    if (
+        not hmac.compare_digest(observed[:insertion_offset], expected[:insertion_offset])
+        or not hmac.compare_digest(observed[insertion_offset + insertion_size:], expected[insertion_offset:])
+        or not injection.startswith(HF_STATIC_INDEX_INJECTION_PREFIX)
+        or not injection.endswith(HF_STATIC_INDEX_INJECTION_SUFFIX)
+    ):
+        raise BenchError(phase, "public index differs outside the reviewed static-provider injection", exit_code)
+
+    variables_bytes = injection[
+        len(HF_STATIC_INDEX_INJECTION_PREFIX):-len(HF_STATIC_INDEX_INJECTION_SUFFIX)
+    ]
+    try:
+        variables = strict_json_from_bytes(
+            variables_bytes,
+            source="public static-provider variables",
+            max_bytes=MAX_HF_STATIC_INDEX_INJECTION_BYTES,
+        )
+    except (BenchError, UnicodeError, ValueError, TypeError) as exc:
+        raise BenchError(phase, "public index contains a malformed static-provider injection", exit_code) from exc
+    if variables != {"SPACE_CREATOR_USER_ID": HF_STATIC_CREATOR_USER_ID}:
+        raise BenchError(phase, "public index contains unreviewed static-provider variables", exit_code)
+    reconstructed = expected[:insertion_offset] + injection + expected[insertion_offset:]
+    if not hmac.compare_digest(reconstructed, observed):
+        raise BenchError(phase, "public index normalization did not preserve all observed bytes", exit_code)
+    return {
+        "transform": "HF_STATIC_CREATOR_METADATA_V1",
+        "raw_sha256": observed_sha256,
+        "normalized_sha256": expected_sha256,
+        "injection_sha256": sha256_bytes(injection),
+    }
+
+
+def require_live_revision_header(
+    headers: Mapping[str, str],
+    revision: str,
+    *,
+    phase: str = "public_runtime",
+    exit_code: int = EXIT_PROVIDER,
+) -> str:
+    values = [str(value).strip() for key, value in headers.items() if str(key).lower() == "x-repo-commit"]
+    if values != [revision]:
+        raise BenchError(phase, "public response is not bound to the expected immutable Space revision", exit_code)
+    return values[0]
+
+
 def publish_and_witness(
     context: HubContext,
     payload_bytes: bytes,
@@ -2525,18 +2600,19 @@ def publish_and_witness(
         last_error: str | None = None
         public_bytes: bytes | None = None
         public_index: bytes | None = None
+        public_index_evidence: dict[str, str | None] | None = None
         while time.monotonic() < public_deadline:
             try:
-                public_bytes, _ = http_get_bytes(
+                public_bytes, results_headers = http_get_bytes(
                     f"{SPACE_URL}/results.json?run={commit_sha}", timeout=10, max_bytes=MAX_HTTP_BYTES, expect_json=True
                 )
-                public_index, index_headers = http_get_bytes(f"{SPACE_URL}/?run={commit_sha}", timeout=15, max_bytes=MAX_HTTP_BYTES)
+                public_index, index_headers = http_get_bytes(f"{SPACE_URL}/index.html?run={commit_sha}", timeout=15, max_bytes=MAX_HTTP_BYTES)
                 if "text/html" not in str(index_headers.get("Content-Type", "")).lower():
                     raise BenchError("public_runtime", "public index has the wrong content type", EXIT_PROVIDER)
                 if not hmac.compare_digest(sha256_bytes(public_bytes), sha256_bytes(payload_bytes)):
                     raise BenchError("public_runtime", "public results payload digest mismatch", EXIT_PROVIDER)
-                if not hmac.compare_digest(sha256_bytes(public_index), sha256_bytes(index_bytes)):
-                    raise BenchError("public_runtime", "public index digest mismatch", EXIT_PROVIDER)
+                require_live_revision_header(results_headers, commit_sha)
+                public_index_evidence = verify_live_static_index(index_bytes, public_index)
                 break
             except BenchError as exc:
                 last_error = str(exc)
@@ -2565,7 +2641,8 @@ def publish_and_witness(
         raise
     return {
         "space": SPACE_ID,
-        "space_url": SPACE_URL,
+        "space_url": f"{SPACE_URL}/index.html",
+        "public_index_url": f"{SPACE_URL}/index.html?run={commit_sha}",
         "publisher": context.username,
         "parent_commit": context.parent_sha,
         "commit": commit_sha,
@@ -2575,7 +2652,11 @@ def publish_and_witness(
         "immutable_readme_sha256": immutable_hashes["README.md"],
         "provider_stage": "RUNNING",
         "public_results_sha256": sha256_bytes(public_bytes or b""),
-        "public_index_sha256": sha256_bytes(public_index or b""),
+        "public_results_revision": commit_sha,
+        "public_index_sha256": (public_index_evidence or {}).get("raw_sha256"),
+        "public_index_normalized_sha256": (public_index_evidence or {}).get("normalized_sha256"),
+        "public_index_transform": (public_index_evidence or {}).get("transform"),
+        "public_index_injection_sha256": (public_index_evidence or {}).get("injection_sha256"),
         "first_head_observation": first_head,
         "final_head_observation": final_head,
         "witnessed_at": utc_now(),
