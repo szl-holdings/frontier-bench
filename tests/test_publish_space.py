@@ -283,7 +283,11 @@ class AnonymousWitnessTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="szl-anon-test-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.files = {"README.md": b"readme fixture", "index.html": b"index fixture", "results.json": b"{}"}
+        self.files = {
+            "README.md": b"readme fixture",
+            "index.html": b"<!doctype html><html><head></head><body>index fixture</body></html>",
+            "results.json": b"{}",
+        }
         self.info = SimpleNamespace(id=publisher.TARGET, sha="a" * 40, private=False, sdk="static", host=controller.SPACE_URL)
         self.api = Mock()
         self.api.space_info.return_value = self.info
@@ -303,7 +307,10 @@ class AnonymousWitnessTests(unittest.TestCase):
         def http(url, **_kwargs):
             name = "results.json" if "/results.json?" in url else "index.html"
             self.assertEqual(url, f"{controller.SPACE_URL}/{name}?run={'a' * 40}")
-            return public[name], {"Content-Type": "application/json" if name.endswith(".json") else "text/html"}
+            headers = {"Content-Type": "application/json" if name.endswith(".json") else "text/html"}
+            if name.endswith(".json"):
+                headers["X-Repo-Commit"] = "a" * 40
+            return public[name], headers
 
         with patch.dict(sys.modules, {"huggingface_hub": SimpleNamespace(HfApi=self.factory)}), \
                 patch.object(controller, "_download_hub_file_strict", side_effect=download), \
@@ -326,6 +333,29 @@ class AnonymousWitnessTests(unittest.TestCase):
         self.assertEqual(outcome["public_index_url"], f"{controller.SPACE_URL}/index.html?run={'a' * 40}")
         self.assertEqual(self.api.space_info.call_count, 2)
         self.assertEqual(self.api.get_space_runtime.call_count, 2)
+
+    def test_reviewed_static_provider_injection_is_noop_verified(self) -> None:
+        injection = (
+            controller.HF_STATIC_INDEX_INJECTION_PREFIX
+            + controller.canonical_json_bytes({"SPACE_CREATOR_USER_ID": controller.HF_STATIC_CREATOR_USER_ID})
+            + controller.HF_STATIC_INDEX_INJECTION_SUFFIX
+        )
+        public_index = self.files["index.html"].replace(b"<head>", b"<head>" + injection, 1)
+        outcome = self.invoke(public={**self.files, "index.html": public_index})
+        self.assertEqual(outcome["public_index_transform"], "HF_STATIC_CREATOR_METADATA_V1")
+        self.assertEqual(outcome["public_index_sha256"], controller.sha256_bytes(public_index))
+        self.assertEqual(outcome["public_index_normalized_sha256"], controller.sha256_bytes(self.files["index.html"]))
+        self.assertEqual(outcome["public_index_injection_sha256"], controller.sha256_bytes(injection))
+
+    def test_unreviewed_static_provider_injection_cannot_be_noop_success(self) -> None:
+        injection = (
+            controller.HF_STATIC_INDEX_INJECTION_PREFIX
+            + b'{"SPACE_CREATOR_USER_ID":"000000000000000000000000"}'
+            + controller.HF_STATIC_INDEX_INJECTION_SUFFIX
+        )
+        public_index = self.files["index.html"].replace(b"<head>", b"<head>" + injection, 1)
+        with self.assertRaisesRegex(controller.BenchError, "unreviewed static-provider variables"):
+            self.invoke(public={**self.files, "index.html": public_index})
 
     def test_changed_immutable_bundle_requires_authentication_without_writing(self) -> None:
         self.assertIsNone(self.invoke(remote={**self.files, "README.md": b"different"}))
@@ -356,6 +386,14 @@ class AnonymousWitnessTests(unittest.TestCase):
                      "https://betterwithage-szl-bench-suite.static.hf.space:443"):
             with self.subTest(host=host), self.assertRaises(ValueError):
                 publisher._live_url(SimpleNamespace(host=host))
+
+
+class WorkflowContractTests(unittest.TestCase):
+    def test_main_and_weekly_publication_are_enabled_while_prs_stay_read_only(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "bench.yml").read_text(encoding="utf-8")
+        self.assertIn('cron: "17 6 * * 1"', workflow)
+        self.assertIn("github.event_name != 'pull_request'", workflow)
+        self.assertNotIn("Scheduled publication is intentionally disabled", workflow)
 
 
 if __name__ == "__main__":

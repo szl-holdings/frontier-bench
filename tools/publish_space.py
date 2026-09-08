@@ -151,13 +151,20 @@ def verify_anonymous_noop(controller: ModuleType, files: dict[str, bytes], run_r
             return None
         hashes[name] = controller.sha256_bytes(observed)
     public_hashes: dict[str, str] = {}
+    public_index_evidence: dict[str, str | None] | None = None
     for name, route in (("index.html", "index.html"), ("results.json", "results.json")):
         observed, headers = controller.http_get_bytes(f"{live_url}{route}?run={before_sha}", timeout=15,
                                                        max_bytes=controller.MAX_HTTP_BYTES, expect_json=name.endswith(".json"))
         if name == "index.html" and "text/html" not in str(headers.get("Content-Type", "")).lower():
             raise controller.BenchError("anonymous_witness", "public index has the wrong content type", controller.EXIT_PROVIDER)
-        if observed != files[name]:
-            raise controller.BenchError("anonymous_witness", f"public {name} differs from the verified bundle", controller.EXIT_PROVIDER)
+        if name == "index.html":
+            public_index_evidence = controller.verify_live_static_index(
+                files[name], observed, phase="anonymous_witness"
+            )
+        else:
+            controller.require_live_revision_header(headers, before_sha, phase="anonymous_witness")
+            if observed != files[name]:
+                raise controller.BenchError("anonymous_witness", f"public {name} differs from the verified bundle", controller.EXIT_PROVIDER)
         public_hashes[name] = controller.sha256_bytes(observed)
     after = api.space_info(repo_id=TARGET)
     after_runtime = api.get_space_runtime(repo_id=TARGET)
@@ -171,7 +178,11 @@ def verify_anonymous_noop(controller: ModuleType, files: dict[str, bytes], run_r
         "authenticated_write": False, "provider_stage": "RUNNING",
         "immutable_readback_sha256": hashes["results.json"], "immutable_index_sha256": hashes["index.html"],
         "immutable_readme_sha256": hashes["README.md"], "public_results_sha256": public_hashes["results.json"],
+        "public_results_revision": before_sha,
         "public_index_sha256": public_hashes["index.html"],
+        "public_index_normalized_sha256": (public_index_evidence or {}).get("normalized_sha256"),
+        "public_index_transform": (public_index_evidence or {}).get("transform"),
+        "public_index_injection_sha256": (public_index_evidence or {}).get("injection_sha256"),
     }
 
 
