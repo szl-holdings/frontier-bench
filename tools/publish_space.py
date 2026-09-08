@@ -65,7 +65,8 @@ def read_bundle(controller: ModuleType, directory: Path) -> tuple[dict[str, byte
                                                    exit_code=controller.EXIT_RESULT)
     if controller.finalize_space_index(template, files["results.json"]) != files["index.html"]:
         raise controller.BenchError("bundle_admission", "bundle index differs from the reviewed template finalized for these results bytes", controller.EXIT_RESULT)
-    payload = controller.strict_json_from_bytes(files["results.json"], source="bundle/results.json")
+    payload = controller.strict_json_from_bytes(files["results.json"], source="bundle/results.json",
+                                                max_bytes=controller.MAX_HTTP_BYTES)
     required = {"schema_version", "generated_at", "data_state", "count", "results_sha256", "sources", "results"}
     if not isinstance(payload, dict) or set(payload) != required or payload.get("schema_version") != "szl-bench-results/v2":
         raise controller.BenchError("bundle_admission", "results payload has an unsupported schema", controller.EXIT_RESULT)

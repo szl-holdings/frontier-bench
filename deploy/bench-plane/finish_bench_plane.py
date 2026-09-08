@@ -392,9 +392,11 @@ def _reject_duplicate_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def strict_json_from_bytes(data: bytes, *, source: str) -> Any:
-    if len(data) > MAX_JSON_BYTES:
-        raise BenchError("receipt_verification", f"{source}: JSON exceeds {MAX_JSON_BYTES} bytes", EXIT_RECEIPT)
+def strict_json_from_bytes(data: bytes, *, source: str, max_bytes: int = MAX_JSON_BYTES) -> Any:
+    if type(max_bytes) is not int or not 0 < max_bytes <= MAX_HTTP_BYTES:
+        raise ValueError("strict JSON byte limit must be positive and no larger than MAX_HTTP_BYTES")
+    if len(data) > max_bytes:
+        raise BenchError("receipt_verification", f"{source}: JSON exceeds {max_bytes} bytes", EXIT_RECEIPT)
     try:
         text = data.decode("utf-8")
         value = json.loads(
