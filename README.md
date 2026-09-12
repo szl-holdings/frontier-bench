@@ -12,6 +12,8 @@ The honest companion to every engine claim. If the estate says the engine is fas
 - **Receipts** — benchmark runs are hashed and chained so results history is tamper-evident.
 - **Bounded claims** — source, receipt admission, CI, service runtime, and public readback have separate evidence.
 - **Fail-closed display** — the public surface renders only verified results; anything unverifiable appears as absent.
+- **Token-observed TTFT** — streaming TTFT starts at the first non-empty generated-text event, not an SSE role or usage event; non-streaming runs do not claim TTFT.
+- **Empty-response rejection** — a nominally successful HTTP stream with no generated text is a failed sample, even if its usage metadata claims completion tokens.
 
 ## Public surface
 

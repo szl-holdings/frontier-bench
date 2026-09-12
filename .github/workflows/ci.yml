@@ -17,6 +17,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: python tests/test_verifier.py
       - run: python tests/test_metrics.py
+      - run: python tests/test_client.py
       - name: Test the bench-plane controller
         run: python -I -B deploy/bench-plane/test_finish_bench_plane.py
       - name: End-to-end run against live mock server
