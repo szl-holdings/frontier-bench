@@ -56,7 +56,12 @@ def chat_completion(base_url: str, model: str, prompt: str, max_tokens: int = 12
                         obj = json.loads(chunk)
                     except json.JSONDecodeError:
                         continue
-                    delta = obj.get("choices", [{}])[0].get("delta", {})
+                    choices = obj.get("choices", [])
+                    if not isinstance(choices, list):
+                        raise ValueError("choices must be an array")
+                    # A valid usage-only SSE chunk has an empty choices array.
+                    # It must preserve usage without fabricating text or TTFT.
+                    delta = choices[0].get("delta", {}) if choices else {}
                     content = delta.get("content")
                     if isinstance(content, str) and content:
                         # Metadata-only SSE events (for example, the initial
@@ -65,14 +70,19 @@ def chat_completion(base_url: str, model: str, prompt: str, max_tokens: int = 12
                         if ttft is None:
                             ttft = time.perf_counter() - t_start
                         text_chunks.append(content)
-                    if "usage" in obj and obj["usage"]:
+                    if obj.get("usage") is not None:
+                        if not isinstance(obj["usage"], dict):
+                            raise ValueError("usage must be an object")
                         usage = obj["usage"]
             else:
                 body = json.loads(resp.read().decode("utf-8"))
                 content = body["choices"][0]["message"]["content"]
                 if isinstance(content, str) and content:
                     text_chunks.append(content)
-                usage = body.get("usage", {})
+                received_usage = body.get("usage")
+                if received_usage is not None and not isinstance(received_usage, dict):
+                    raise ValueError("usage must be an object")
+                usage = received_usage if received_usage is not None else {}
     except urllib.error.HTTPError as e:
         return GenerationResult(ok=False, error=str(e), status_code=e.code)
     except urllib.error.URLError as e:
