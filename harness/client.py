@@ -56,18 +56,33 @@ def chat_completion(base_url: str, model: str, prompt: str, max_tokens: int = 12
                         obj = json.loads(chunk)
                     except json.JSONDecodeError:
                         continue
-                    if ttft is None:
-                        ttft = time.perf_counter() - t_start
-                    delta = obj.get("choices", [{}])[0].get("delta", {})
-                    if "content" in delta and delta["content"]:
-                        text_chunks.append(delta["content"])
-                    if "usage" in obj and obj["usage"]:
+                    choices = obj.get("choices", [])
+                    if not isinstance(choices, list):
+                        raise ValueError("choices must be an array")
+                    # A valid usage-only SSE chunk has an empty choices array.
+                    # It must preserve usage without fabricating text or TTFT.
+                    delta = choices[0].get("delta", {}) if choices else {}
+                    content = delta.get("content")
+                    if isinstance(content, str) and content:
+                        # Metadata-only SSE events (for example, the initial
+                        # assistant-role event) are not generated tokens.  Stop
+                        # the TTFT clock only when observable text arrives.
+                        if ttft is None:
+                            ttft = time.perf_counter() - t_start
+                        text_chunks.append(content)
+                    if obj.get("usage") is not None:
+                        if not isinstance(obj["usage"], dict):
+                            raise ValueError("usage must be an object")
                         usage = obj["usage"]
             else:
                 body = json.loads(resp.read().decode("utf-8"))
-                ttft = time.perf_counter() - t_start
-                text_chunks.append(body["choices"][0]["message"]["content"])
-                usage = body.get("usage", {})
+                content = body["choices"][0]["message"]["content"]
+                if isinstance(content, str) and content:
+                    text_chunks.append(content)
+                received_usage = body.get("usage")
+                if received_usage is not None and not isinstance(received_usage, dict):
+                    raise ValueError("usage must be an object")
+                usage = received_usage if received_usage is not None else {}
     except urllib.error.HTTPError as e:
         return GenerationResult(ok=False, error=str(e), status_code=e.code)
     except urllib.error.URLError as e:
@@ -76,9 +91,18 @@ def chat_completion(base_url: str, model: str, prompt: str, max_tokens: int = 12
         return GenerationResult(ok=False, error=repr(e))
 
     total = time.perf_counter() - t_start
+    text = "".join(text_chunks)
+    if not text:
+        return GenerationResult(
+            ok=False,
+            total_s=total,
+            prompt_tokens=usage.get("prompt_tokens"),
+            completion_tokens=usage.get("completion_tokens"),
+            error="response contained no generated text",
+        )
     return GenerationResult(
         ok=True,
-        text="".join(text_chunks),
+        text=text,
         ttft_s=ttft,
         total_s=total,
         prompt_tokens=usage.get("prompt_tokens"),
