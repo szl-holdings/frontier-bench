@@ -49,22 +49,42 @@ def load_controller() -> ModuleType:
     return module
 
 
+def _bundle_inventory(directory: Path) -> tuple[set[str], set[str]]:
+    """Return (files, directories) below the bundle root as POSIX paths, never following links."""
+    files: set[str] = set()
+    directories: set[str] = set()
+    for current, dirnames, filenames in os.walk(directory, followlinks=False):
+        relative = Path(current).relative_to(directory)
+        for name in dirnames:
+            directories.add((relative / name).as_posix())
+        for name in filenames:
+            files.add((relative / name).as_posix())
+    return files, directories
+
+
 def read_bundle(controller: ModuleType, directory: Path) -> tuple[dict[str, bytes], dict[str, Any]]:
     directory = Path(os.path.abspath(directory.expanduser()))
     controller._reject_link_components(directory, phase="bundle_admission", exit_code=controller.EXIT_RESULT)
-    if not directory.is_dir() or {path.name for path in directory.iterdir()} != BUNDLE_FILES:
-        raise controller.BenchError("bundle_admission", "bundle must contain exactly README.md, index.html, and results.json", controller.EXIT_RESULT)
-    files = {
-        name: controller.read_bounded_regular_file(directory / name, limit=controller.MAX_HTTP_BYTES,
-                                                  phase="bundle_admission", exit_code=controller.EXIT_RESULT)
-        for name in sorted(BUNDLE_FILES)
-    }
+    expected_files = BUNDLE_FILES | set(controller.SPACE_STATIC_ASSETS)
+    expected_directories = {parent.as_posix() for name in controller.SPACE_STATIC_ASSETS for parent in Path(name).parents if parent != Path(".")}
+    if not directory.is_dir() or _bundle_inventory(directory) != (expected_files, expected_directories):
+        raise controller.BenchError("bundle_admission", "bundle must contain exactly README.md, index.html, results.json, and the reviewed Kanchay assets", controller.EXIT_RESULT)
+    files = {}
+    for name in sorted(expected_files):
+        path = directory.joinpath(*name.split("/"))
+        controller._reject_link_components(path, phase="bundle_admission", exit_code=controller.EXIT_RESULT)
+        files[name] = controller.read_bounded_regular_file(path, limit=controller.MAX_HTTP_BYTES,
+                                                           phase="bundle_admission", exit_code=controller.EXIT_RESULT)
     controller.validate_static_space_readme(files["README.md"])
     template = controller.read_bounded_regular_file(CONTROLLER_DIR / "szl-bench-suite.index.html",
                                                    limit=controller.MAX_HTTP_BYTES, phase="bundle_admission",
                                                    exit_code=controller.EXIT_RESULT)
     if controller.finalize_space_index(template, files["results.json"]) != files["index.html"]:
         raise controller.BenchError("bundle_admission", "bundle index differs from the reviewed template finalized for these results bytes", controller.EXIT_RESULT)
+    reviewed_assets = controller.load_space_static_assets(CONTROLLER_DIR / "szl-bench-suite.index.html",
+                                                          phase="bundle_admission", exit_code=controller.EXIT_RESULT)
+    if any(files[name] != data for name, data in reviewed_assets.items()):
+        raise controller.BenchError("bundle_admission", "bundle Kanchay assets differ from the reviewed vendored files", controller.EXIT_RESULT)
     payload = controller.strict_json_from_bytes(files["results.json"], source="bundle/results.json",
                                                 max_bytes=controller.MAX_HTTP_BYTES)
     required = {"schema_version", "generated_at", "data_state", "count", "results_sha256", "sources", "results"}
@@ -141,7 +161,7 @@ def verify_anonymous_noop(controller: ModuleType, files: dict[str, bytes], run_r
     if bool(getattr(before, "private", True)) or getattr(before, "sdk", "") != "static" or str(getattr(runtime, "stage", "UNKNOWN")) != "RUNNING":
         return None
     remote_files = set(api.list_repo_files(repo_id=TARGET, repo_type="space", revision=before_sha))
-    if not BUNDLE_FILES.issubset(remote_files):
+    if not set(files).issubset(remote_files):
         return None
     download_root = controller.ensure_private_directory(run_root / "anonymous-downloads", phase="anonymous_witness", exit_code=controller.EXIT_PROVIDER)
     hashes: dict[str, str] = {}
@@ -166,6 +186,9 @@ def verify_anonymous_noop(controller: ModuleType, files: dict[str, bytes], run_r
             if observed != files[name]:
                 raise controller.BenchError("anonymous_witness", f"public {name} differs from the verified bundle", controller.EXIT_PROVIDER)
         public_hashes[name] = controller.sha256_bytes(observed)
+    public_asset_hashes = controller.verify_public_static_assets(
+        live_url, before_sha, {name: files[name] for name in controller.SPACE_STATIC_ASSETS}, phase="anonymous_witness"
+    )
     after = api.space_info(repo_id=TARGET)
     after_runtime = api.get_space_runtime(repo_id=TARGET)
     if (str(getattr(after, "sha", "")) != before_sha or str(getattr(after_runtime, "stage", "UNKNOWN")) != "RUNNING"
@@ -178,6 +201,8 @@ def verify_anonymous_noop(controller: ModuleType, files: dict[str, bytes], run_r
         "authenticated_write": False, "provider_stage": "RUNNING",
         "immutable_readback_sha256": hashes["results.json"], "immutable_index_sha256": hashes["index.html"],
         "immutable_readme_sha256": hashes["README.md"], "public_results_sha256": public_hashes["results.json"],
+        "immutable_static_asset_sha256": {name: hashes[name] for name in controller.SPACE_STATIC_ASSETS},
+        "public_static_asset_sha256": public_asset_hashes,
         "public_results_revision": before_sha,
         "public_index_sha256": public_hashes["index.html"],
         "public_index_normalized_sha256": (public_index_evidence or {}).get("normalized_sha256"),
@@ -251,7 +276,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     advertised_url = _live_url(context.api.space_info(repo_id=TARGET))
                     if advertised_url.rstrip("/") != controller.SPACE_URL.rstrip("/"):
                         raise controller.BenchError("hub_auth", "provider host differs from the reviewed controller's static host", controller.EXIT_HUB_AUTH)
-                    if context.readme_bytes != files["README.md"] or controller.finalize_space_index(context.index_template_bytes, files["results.json"]) != files["index.html"]:
+                    if (context.readme_bytes != files["README.md"]
+                            or controller.finalize_space_index(context.index_template_bytes, files["results.json"]) != files["index.html"]
+                            or dict(context.static_asset_bytes) != {name: files[name] for name in controller.SPACE_STATIC_ASSETS}):
                         raise controller.BenchError("bundle_admission", "publication assets changed after initial admission", controller.EXIT_RESULT)
                     report["remote_mutation"] = "ATTEMPT_IN_PROGRESS"
                     controller.atomic_write(report_path, controller.pretty_json_bytes(report))

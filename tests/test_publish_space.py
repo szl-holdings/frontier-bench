@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -48,14 +49,21 @@ class PublisherTests(unittest.TestCase):
         self.template = (publisher.CONTROLLER_DIR / "szl-bench-suite.index.html").read_bytes()
         self.readme = (publisher.CONTROLLER_DIR / "szl-bench-suite.README.md").read_bytes()
         self.payload = controller.pretty_json_bytes(payload_fixture())
+        self.assets = controller.load_space_static_assets(publisher.CONTROLLER_DIR / "szl-bench-suite.index.html",
+                                                          phase="test", exit_code=1)
         self.write_bundle()
         self.context = SimpleNamespace(readme_bytes=self.readme, index_template_bytes=self.template,
+                                       static_asset_bytes=dict(self.assets),
                                        api=SimpleNamespace(space_info=Mock(return_value=SimpleNamespace(host=controller.SPACE_URL))))
 
     def write_bundle(self) -> None:
         (self.bundle / "README.md").write_bytes(self.readme)
         (self.bundle / "results.json").write_bytes(self.payload)
         (self.bundle / "index.html").write_bytes(controller.finalize_space_index(self.template, self.payload))
+        for name, data in self.assets.items():
+            target = self.bundle / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
 
     def invoke(self, *, token: bool = True, expected: bytes | None = None, extra: list[str] | None = None,
                readmit_error: BaseException | None = None, publish_error: BaseException | None = None,
@@ -148,6 +156,42 @@ class PublisherTests(unittest.TestCase):
         code, _, _, preflight, publish = self.invoke()
         self.assertNotEqual(code, 0)
         preflight.assert_not_called()
+        publish.assert_not_called()
+
+    def test_valid_bundle_carries_exact_reviewed_kanchay_assets(self) -> None:
+        files, _ = publisher.read_bundle(controller, self.bundle)
+        self.assertEqual(set(files), publisher.BUNDLE_FILES | set(controller.SPACE_STATIC_ASSETS))
+        for name, digest in controller.SPACE_STATIC_ASSETS.items():
+            self.assertEqual(controller.sha256_bytes(files[name]), digest)
+
+    def test_tampered_missing_or_extra_kanchay_asset_aborts_before_provider(self) -> None:
+        kanchay = self.bundle / "kanchay"
+        mutations = {
+            "tampered stylesheet": lambda: (kanchay / "kanchay.css").write_bytes(b":root { --color-a11oy-bg: red; }\n"),
+            "missing stylesheet": lambda: (kanchay / "kanchay.css").unlink(),
+            "unreviewed font": lambda: (kanchay / "fonts" / "Syncopate-400.woff2").write_bytes(b"unreviewed"),
+            "unreviewed directory": lambda: (kanchay / "marks").mkdir(),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label):
+                shutil.rmtree(self.bundle)
+                self.bundle.mkdir()
+                self.write_bundle()
+                mutate()
+                code, report, readmit, preflight, publish = self.invoke()
+                self.assertEqual(code, controller.EXIT_RESULT)
+                self.assertEqual(report["failure"]["phase"], "bundle_admission")
+                readmit.assert_not_called()
+                preflight.assert_not_called()
+                publish.assert_not_called()
+                self.report.unlink()
+
+    def test_provider_context_assets_must_equal_bundle_assets(self) -> None:
+        self.context.static_asset_bytes = {**self.assets, "kanchay/kanchay.css": b"different"}
+        code, report, _, preflight, publish = self.invoke()
+        self.assertEqual(code, controller.EXIT_RESULT)
+        self.assertEqual(report["remote_mutation"], "NOT_ATTEMPTED")
+        preflight.assert_called_once()
         publish.assert_not_called()
 
     def test_source_pin_mismatch_aborts_before_provider(self) -> None:
@@ -287,6 +331,7 @@ class AnonymousWitnessTests(unittest.TestCase):
             "README.md": b"readme fixture",
             "index.html": b"<!doctype html><html><head></head><body>index fixture</body></html>",
             "results.json": b"{}",
+            **{name: f"asset fixture {name}".encode() for name in controller.SPACE_STATIC_ASSETS},
         }
         self.info = SimpleNamespace(id=publisher.TARGET, sha="a" * 40, private=False, sdk="static", host=controller.SPACE_URL)
         self.api = Mock()
@@ -305,10 +350,12 @@ class AnonymousWitnessTests(unittest.TestCase):
             return remote[name]
 
         def http(url, **_kwargs):
-            name = "results.json" if "/results.json?" in url else "index.html"
+            name = url.split("?", 1)[0].removeprefix(f"{controller.SPACE_URL}/")
+            self.assertIn(name, self.files)
             self.assertEqual(url, f"{controller.SPACE_URL}/{name}?run={'a' * 40}")
-            headers = {"Content-Type": "application/json" if name.endswith(".json") else "text/html"}
-            if name.endswith(".json"):
+            kinds = {".json": "application/json", ".html": "text/html", ".css": "text/css", ".woff2": "font/woff2"}
+            headers = {"Content-Type": kinds[Path(name).suffix]}
+            if name != "index.html":
                 headers["X-Repo-Commit"] = "a" * 40
             return public[name], headers
 
@@ -367,6 +414,20 @@ class AnonymousWitnessTests(unittest.TestCase):
     def test_public_bytes_mismatch_cannot_be_noop_success(self) -> None:
         with self.assertRaisesRegex(controller.BenchError, "differs from the verified bundle"):
             self.invoke(public={**self.files, "results.json": b"different"})
+
+    def test_noop_witnesses_every_public_kanchay_asset(self) -> None:
+        outcome = self.invoke()
+        expected = {name: controller.sha256_bytes(self.files[name]) for name in controller.SPACE_STATIC_ASSETS}
+        self.assertEqual(outcome["public_static_asset_sha256"], expected)
+        self.assertEqual(outcome["immutable_static_asset_sha256"], expected)
+
+    def test_missing_remote_kanchay_asset_requires_authenticated_publication(self) -> None:
+        self.api.list_repo_files.return_value = ["README.md", "index.html", "results.json"]
+        self.assertIsNone(self.invoke())
+
+    def test_public_kanchay_asset_mismatch_cannot_be_noop_success(self) -> None:
+        with self.assertRaisesRegex(controller.BenchError, "differs from the reviewed vendored asset"):
+            self.invoke(public={**self.files, "kanchay/kanchay.css": b"different"})
 
     def test_concurrent_head_change_cannot_be_noop_success(self) -> None:
         changed = SimpleNamespace(**{**vars(self.info), "sha": "b" * 40})
