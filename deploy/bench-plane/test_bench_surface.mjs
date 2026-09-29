@@ -171,7 +171,15 @@ await test('valid fixture measurements render all three tables using text nodes'
   for (const [plane, body] of Object.entries(page.bodies)) {
     assert.equal(body.children.length, 1);
     assert.equal(body.children[0].className, 'measured');
-    assert.equal(body.children[0].children.length, plane === 'retrieval' ? 8 : 7);
+    assert.equal(body.children[0].children.length, plane === 'retrieval' ? 9 : 8);
+    const receiptCell = body.children[0].children.at(-1);
+    const [receipt] = receiptCell.children;
+    const item = measuredPayload().results.find(row => row.plane === plane);
+    assert.equal(receipt.className, 'receipt');
+    assert.deepEqual(receipt.children.map(child => child.className), ['receipt__dot', 'receipt__label', 'receipt__root']);
+    assert.equal(receipt.children[1].textContent, 'admitted');
+    assert.equal(receipt.children[2].textContent, item.receipt.slice(0, 12));
+    assert.equal(receipt.title, `receipt ${item.receipt}`);
   }
   assert.match(page.bodies.engine.children[0].children[0].textContent, /^<img /);
   page.buttons[1].listeners.click();

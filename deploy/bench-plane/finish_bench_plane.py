@@ -94,18 +94,16 @@ HF_STATIC_CREATOR_USER_ID = "69ec7d565e5561c3b16baba8"
 MAX_HF_STATIC_INDEX_INJECTION_BYTES = 512
 # Updated deliberately whenever either reviewed publication asset changes.
 SPACE_README_SHA256 = "c3d6f9c45e81db69dacd79dab23c0fa2b67abea0a0d22b23f051c4ca0ab347e9"
-SPACE_INDEX_TEMPLATE_SHA256 = "8e1d4627d0c53138442f5509f6ed6e842510ff2d56f52701af1c52d3e3c2b29e"
-# SZL Kanchay v1.0.0 design-system files served beside index.html. They are
-# byte-for-byte copies of szl-holdings/szl-brand kanchay/ (digests from its
-# SOURCE.json), vendored under deploy/bench-plane/kanchay/ and published at the
-# same relative paths. Presentation only: they carry no data or evidence.
+SPACE_INDEX_TEMPLATE_SHA256 = "5ba6662bdb8a248189313199cd0c445ef264d4519202275a9bbc6d78507b57fe"
+# SZL KANCHAY v1.1.0 (founder direction) files served beside index.html. They
+# are byte-for-byte copies of szl-holdings/szl-brand kit/tokens/szl-design-system.css
+# and kit/logos/ at 168c53a (digests from its SOURCE.json), vendored under
+# deploy/bench-plane/szl/ and published at the same relative paths. Presentation
+# only: they carry no data or evidence. No webfonts: the system uses font stacks.
 SPACE_STATIC_ASSETS: Mapping[str, str] = {
-    "kanchay/SOURCE.json": "f1bc16257b85faf712639b226cff6678cae4fe8eca8960a9ef783373c3ad0219",
-    "kanchay/kanchay.css": "d083a2ca219f29164d793e243b466320f27a37080b30384f93a8c0db6313d98b",
-    "kanchay/kanchay-components.css": "77a6493edc9a25392caf36a97bdb51f767b8add2936c1511fbe006bbb1031f66",
-    "kanchay/fonts/Inter-latin.woff2": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62",
-    "kanchay/fonts/JetBrainsMono-latin.woff2": "83c005d49d8a6a50474c73a5a36ac0468076e9c4a29da7bdb14995d80560a5be",
-    "kanchay/fonts/SpaceGrotesk-latin.woff2": "0640890476fc1198ab4de571fb658de443c4d85b66466ec09534a8737ab1ce9d",
+    "szl/SOURCE.json": "c5cc20317b84df07b96a9605e18b44d9be50354f0fa5274717e6323e2d8f4240",
+    "szl/szl-design-system.css": "7e341334b45cdcccceff05a670cc7381f0c0961c397dbb092b5f553f61ac5604",
+    "szl/logos/szl_favicon.svg": "2d9f450cc652d1d6969e4e39a71c8a631d06aa8145411e868a59daf93b640bed",
 }
 SPACE_CORE_FILES: tuple[str, ...] = ("README.md", "index.html", "results.json")
 SPACE_MANAGED_FILES: tuple[str, ...] = SPACE_CORE_FILES + tuple(SPACE_STATIC_ASSETS)

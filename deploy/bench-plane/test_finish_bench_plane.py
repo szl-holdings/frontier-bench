@@ -261,37 +261,40 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(rendered.count(bench.sha256_bytes(payload).encode("ascii")), 1)
         self.assertNotIn(bench.RESULT_DIGEST_PLACEHOLDER.encode("ascii"), rendered)
 
-    def test_vendored_kanchay_assets_match_pins_and_source_manifest(self) -> None:
+    def test_vendored_szl_assets_match_pins_and_source_manifest(self) -> None:
         assets = bench.load_space_static_assets(HERE / "szl-bench-suite.index.html", phase="test", exit_code=1)
         self.assertEqual(list(assets), list(bench.SPACE_STATIC_ASSETS))
-        manifest = json.loads(assets["kanchay/SOURCE.json"])
-        self.assertEqual((manifest["name"], manifest["version"]), ("szl-kanchay", "1.0.0"))
+        manifest = json.loads(assets["szl/SOURCE.json"])
+        self.assertEqual((manifest["name"], manifest["version"]), ("szl-kanchay", "1.1.0"))
         for name, data in assets.items():
-            if name != "kanchay/SOURCE.json":
-                self.assertEqual(manifest["sha256"][name.removeprefix("kanchay/")], bench.sha256_bytes(data))
+            if name != "szl/SOURCE.json":
+                self.assertEqual(manifest["sha256"][name.removeprefix("szl/")], bench.sha256_bytes(data))
+        self.assertFalse(any(name.endswith((".woff", ".woff2", ".ttf", ".otf")) for name in bench.SPACE_STATIC_ASSETS))
 
     def test_space_index_resolves_every_asset_locally(self) -> None:
         html = (HERE / "szl-bench-suite.index.html").read_text(encoding="utf-8")
         stylesheets = re.findall(r'<link rel="stylesheet" href="([^"]+)">', html)
-        self.assertEqual(stylesheets, ["kanchay/kanchay.css", "kanchay/kanchay-components.css"])
-        self.assertLessEqual(set(stylesheets), set(bench.SPACE_STATIC_ASSETS))
+        self.assertEqual(stylesheets, ["szl/szl-design-system.css"])
+        local_refs = set(re.findall(r'(?:href|src)="(szl/[^"]+)"', html))
+        self.assertEqual(local_refs, {"szl/szl-design-system.css", "szl/logos/szl_favicon.svg"})
+        self.assertLessEqual(local_refs, set(bench.SPACE_STATIC_ASSETS))
         policy = re.search(r'http-equiv="Content-Security-Policy" content="([^"]+)"', html).group(1)
         directives = {part.split()[0]: part.split()[1:] for part in (item.strip() for item in policy.split(";")) if part}
         self.assertEqual(directives["default-src"], ["'none'"])
         self.assertIn("'self'", directives["style-src"])
-        self.assertEqual(directives["font-src"], ["'self'"])
-        self.assertNotRegex(html, r"https?://[^\"']*(?:fonts\.googleapis|fonts\.gstatic|cdn)")
-        css = (HERE / "kanchay" / "kanchay.css").read_text(encoding="utf-8")
-        fonts = re.findall(r"url\('\./(fonts/[^']+)'\)", css)
-        self.assertEqual(len(fonts), 3)
-        self.assertLessEqual({f"kanchay/{font}" for font in fonts}, set(bench.SPACE_STATIC_ASSETS))
+        self.assertEqual(directives["img-src"], ["'self'"])
+        self.assertNotIn("font-src", directives)
+        self.assertNotRegex(html, r"https?://[^\"']*(?:fonts\.googleapis|fonts\.gstatic|fontshare|cdn)")
+        css = (HERE / "szl" / "szl-design-system.css").read_text(encoding="utf-8")
+        self.assertNotIn("@font-face", css)
+        self.assertNotIn("url(", css)
 
     def test_space_index_style_uses_tokens_not_color_literals(self) -> None:
         html = (HERE / "szl-bench-suite.index.html").read_text(encoding="utf-8")
         markup = html.split("<script>", 1)[0]
         self.assertEqual(re.findall(r"#[0-9A-Fa-f]{3,8}\b", markup), [])
         self.assertIsNone(re.search(r"\b(?:rgba?|hsla?)\(", markup))
-        self.assertIsNone(re.search(r"(?i)monospace|menlo|consolas|segoe", markup))
+        self.assertIsNone(re.search(r"(?i)monospace|menlo|consolas|segoe|system-ui|\binter\b|grotesk|jetbrains|ibm plex", markup))
 
     def test_tampered_vendored_asset_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -303,22 +306,22 @@ class ControlTests(unittest.TestCase):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes((HERE / name).read_bytes())
             self.assertEqual(len(bench.load_space_static_assets(index, phase="test", exit_code=1)), len(bench.SPACE_STATIC_ASSETS))
-            (root / "kanchay" / "kanchay.css").write_bytes(b":root { --color-a11oy-bg: red; }\n")
+            (root / "szl" / "szl-design-system.css").write_bytes(b":root { --accent: red; }\n")
             with self.assertRaisesRegex(bench.BenchError, "reviewed digest"):
                 bench.load_space_static_assets(index, phase="test", exit_code=1)
-            (root / "kanchay" / "kanchay.css").unlink()
+            (root / "szl" / "szl-design-system.css").unlink()
             with self.assertRaises(bench.BenchError):
                 bench.load_space_static_assets(index, phase="test", exit_code=1)
 
     def test_public_static_assets_require_exact_self_hosted_bytes(self) -> None:
         revision = "a" * 40
-        assets = {"kanchay/kanchay.css": b":root{}\n", "kanchay/fonts/Inter-latin.woff2": b"wOF2fixture"}
+        assets = {"szl/szl-design-system.css": b":root{}\n", "szl/logos/szl_favicon.svg": b"<svg/>"}
 
         def serve(content_type: str = "text/css", body: bytes | None = None, commit: str = revision):
             def http_get(url: str, **_: object) -> tuple[bytes, dict[str, str]]:
                 name = url.split("?", 1)[0].removeprefix(f"{bench.SPACE_URL}/")
                 self.assertEqual(url, f"{bench.SPACE_URL}/{name}?run={revision}")
-                kind = content_type if name.endswith(".css") else "font/woff2"
+                kind = content_type if name.endswith(".css") else "image/svg+xml"
                 return (assets[name] if body is None else body), {"Content-Type": kind, "X-Repo-Commit": commit}
             return http_get
 
@@ -874,7 +877,7 @@ class HubPublicationTests(unittest.TestCase):
             name = path.removeprefix(f"{bench.SPACE_URL}/")
             revision = query.removeprefix("run=")
             files = revision_files(revision)
-            kinds = {".json": "application/json", ".html": "text/html", ".css": "text/css", ".woff2": "font/woff2"}
+            kinds = {".json": "application/json", ".html": "text/html", ".css": "text/css", ".svg": "image/svg+xml"}
             headers = {"Content-Type": kinds[pathlib.PurePosixPath(name).suffix], "X-Repo-Commit": revision}
             body = files[name]
             if name == "index.html" and index_public is not None:
@@ -919,7 +922,7 @@ class HubPublicationTests(unittest.TestCase):
         self.assertEqual(api.commits, 0)
         self.assertEqual(api.restarts, 0)
 
-    def test_first_kanchay_publication_commits_and_witnesses_vendored_assets(self) -> None:
+    def test_first_szl_publication_commits_and_witnesses_vendored_assets(self) -> None:
         parent = "a" * 40
         payload = b'{"fixture":"stable"}\n'
         legacy = {"README.md": (HERE / "szl-bench-suite.README.md").read_bytes(), "index.html": b"legacy-index", "results.json": payload}
@@ -940,7 +943,7 @@ class HubPublicationTests(unittest.TestCase):
         files = {"README.md": b"old", "index.html": b"old", "results.json": b"old"}
         api = _FakeHubApi(parent, files)
         context = self.context(api, parent, files)
-        context.static_asset_bytes = {**STATIC_ASSETS, "kanchay/kanchay.css": b"tampered"}
+        context.static_asset_bytes = {**STATIC_ASSETS, "szl/szl-design-system.css": b"tampered"}
         with fake_hub(api, lambda *_args, **_kwargs: (b"", {})):
             with self.assertRaisesRegex(bench.BenchError, "reviewed digests"):
                 bench.publish_and_witness(context, b"{}\n", provider_timeout=0.01, public_http_deadline=0.01)

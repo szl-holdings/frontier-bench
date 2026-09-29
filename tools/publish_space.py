@@ -68,7 +68,7 @@ def read_bundle(controller: ModuleType, directory: Path) -> tuple[dict[str, byte
     expected_files = BUNDLE_FILES | set(controller.SPACE_STATIC_ASSETS)
     expected_directories = {parent.as_posix() for name in controller.SPACE_STATIC_ASSETS for parent in Path(name).parents if parent != Path(".")}
     if not directory.is_dir() or _bundle_inventory(directory) != (expected_files, expected_directories):
-        raise controller.BenchError("bundle_admission", "bundle must contain exactly README.md, index.html, results.json, and the reviewed Kanchay assets", controller.EXIT_RESULT)
+        raise controller.BenchError("bundle_admission", "bundle must contain exactly README.md, index.html, results.json, and the reviewed szl/ design-system assets", controller.EXIT_RESULT)
     files = {}
     for name in sorted(expected_files):
         path = directory.joinpath(*name.split("/"))
@@ -84,7 +84,7 @@ def read_bundle(controller: ModuleType, directory: Path) -> tuple[dict[str, byte
     reviewed_assets = controller.load_space_static_assets(CONTROLLER_DIR / "szl-bench-suite.index.html",
                                                           phase="bundle_admission", exit_code=controller.EXIT_RESULT)
     if any(files[name] != data for name, data in reviewed_assets.items()):
-        raise controller.BenchError("bundle_admission", "bundle Kanchay assets differ from the reviewed vendored files", controller.EXIT_RESULT)
+        raise controller.BenchError("bundle_admission", "bundle szl/ design-system assets differ from the reviewed vendored files", controller.EXIT_RESULT)
     payload = controller.strict_json_from_bytes(files["results.json"], source="bundle/results.json",
                                                 max_bytes=controller.MAX_HTTP_BYTES)
     required = {"schema_version", "generated_at", "data_state", "count", "results_sha256", "sources", "results"}
