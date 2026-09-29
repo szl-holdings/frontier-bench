@@ -12,6 +12,7 @@ import json
 import hmac
 import hashlib
 import os
+import re
 import pathlib
 import subprocess
 import sys
@@ -32,6 +33,7 @@ if MODULE_SPEC is None or MODULE_SPEC.loader is None:
 bench = importlib.util.module_from_spec(MODULE_SPEC)
 sys.modules[MODULE_SPEC.name] = bench
 MODULE_SPEC.loader.exec_module(bench)
+STATIC_ASSETS = bench.load_space_static_assets(HERE / "szl-bench-suite.index.html", phase="test", exit_code=1)
 
 
 def make_spec(genesis: str = "0" * 64) -> bench.RepoSpec:
@@ -258,6 +260,75 @@ class ControlTests(unittest.TestCase):
         rendered = bench.finalize_space_index(template, payload)
         self.assertEqual(rendered.count(bench.sha256_bytes(payload).encode("ascii")), 1)
         self.assertNotIn(bench.RESULT_DIGEST_PLACEHOLDER.encode("ascii"), rendered)
+
+    def test_vendored_kanchay_assets_match_pins_and_source_manifest(self) -> None:
+        assets = bench.load_space_static_assets(HERE / "szl-bench-suite.index.html", phase="test", exit_code=1)
+        self.assertEqual(list(assets), list(bench.SPACE_STATIC_ASSETS))
+        manifest = json.loads(assets["kanchay/SOURCE.json"])
+        self.assertEqual((manifest["name"], manifest["version"]), ("szl-kanchay", "1.0.0"))
+        for name, data in assets.items():
+            if name != "kanchay/SOURCE.json":
+                self.assertEqual(manifest["sha256"][name.removeprefix("kanchay/")], bench.sha256_bytes(data))
+
+    def test_space_index_resolves_every_asset_locally(self) -> None:
+        html = (HERE / "szl-bench-suite.index.html").read_text(encoding="utf-8")
+        stylesheets = re.findall(r'<link rel="stylesheet" href="([^"]+)">', html)
+        self.assertEqual(stylesheets, ["kanchay/kanchay.css", "kanchay/kanchay-components.css"])
+        self.assertTrue(set(stylesheets) <= set(bench.SPACE_STATIC_ASSETS))
+        policy = re.search(r'http-equiv="Content-Security-Policy" content="([^"]+)"', html).group(1)
+        directives = {part.split()[0]: part.split()[1:] for part in (item.strip() for item in policy.split(";")) if part}
+        self.assertEqual(directives["default-src"], ["'none'"])
+        self.assertIn("'self'", directives["style-src"])
+        self.assertEqual(directives["font-src"], ["'self'"])
+        self.assertNotRegex(html, r"https?://[^\"']*(?:fonts\.googleapis|fonts\.gstatic|cdn)")
+        css = (HERE / "kanchay" / "kanchay.css").read_text(encoding="utf-8")
+        fonts = re.findall(r"url\('\./(fonts/[^']+)'\)", css)
+        self.assertEqual(len(fonts), 3)
+        self.assertTrue({f"kanchay/{font}" for font in fonts} <= set(bench.SPACE_STATIC_ASSETS))
+
+    def test_space_index_style_uses_tokens_not_color_literals(self) -> None:
+        html = (HERE / "szl-bench-suite.index.html").read_text(encoding="utf-8")
+        markup = html.split("<script>", 1)[0]
+        self.assertEqual(re.findall(r"#[0-9A-Fa-f]{3,8}\b", markup), [])
+        self.assertIsNone(re.search(r"\b(?:rgba?|hsla?)\(", markup))
+        self.assertIsNone(re.search(r"(?i)monospace|menlo|consolas|segoe", markup))
+
+    def test_tampered_vendored_asset_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            index = root / "szl-bench-suite.index.html"
+            index.write_bytes((HERE / "szl-bench-suite.index.html").read_bytes())
+            for name in bench.SPACE_STATIC_ASSETS:
+                target = root / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((HERE / name).read_bytes())
+            self.assertEqual(len(bench.load_space_static_assets(index, phase="test", exit_code=1)), len(bench.SPACE_STATIC_ASSETS))
+            (root / "kanchay" / "kanchay.css").write_bytes(b":root { --color-a11oy-bg: red; }\n")
+            with self.assertRaisesRegex(bench.BenchError, "reviewed digest"):
+                bench.load_space_static_assets(index, phase="test", exit_code=1)
+            (root / "kanchay" / "kanchay.css").unlink()
+            with self.assertRaises(bench.BenchError):
+                bench.load_space_static_assets(index, phase="test", exit_code=1)
+
+    def test_public_static_assets_require_exact_self_hosted_bytes(self) -> None:
+        revision = "a" * 40
+        assets = {"kanchay/kanchay.css": b":root{}\n", "kanchay/fonts/Inter-latin.woff2": b"wOF2fixture"}
+
+        def serve(content_type: str = "text/css", body: bytes | None = None, commit: str = revision):
+            def http_get(url: str, **_: object) -> tuple[bytes, dict[str, str]]:
+                name = url.split("?", 1)[0].removeprefix(f"{bench.SPACE_URL}/")
+                self.assertEqual(url, f"{bench.SPACE_URL}/{name}?run={revision}")
+                kind = content_type if name.endswith(".css") else "font/woff2"
+                return (assets[name] if body is None else body), {"Content-Type": kind, "X-Repo-Commit": commit}
+            return http_get
+
+        with mock.patch.object(bench, "http_get_bytes", serve()):
+            hashes = bench.verify_public_static_assets(bench.SPACE_URL, revision, assets)
+        self.assertEqual(hashes, {name: bench.sha256_bytes(data) for name, data in assets.items()})
+        for broken in (serve(content_type="text/plain"), serve(body=b"tampered"), serve(commit="b" * 40)):
+            with self.subTest(broken=broken), mock.patch.object(bench, "http_get_bytes", broken):
+                with self.assertRaises(bench.BenchError):
+                    bench.verify_public_static_assets(bench.SPACE_URL, revision, assets)
 
     def test_hub_download_symlink_must_resolve_inside_private_directory(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -516,13 +587,18 @@ class ControlTests(unittest.TestCase):
             docker.assert_not_called()
             hub.assert_not_called()
             bundle = workdir / "bundle"
-            self.assertEqual({entry.name for entry in bundle.iterdir()}, {"README.md", "index.html", "results.json"})
+            exported = {path.relative_to(bundle).as_posix() for path in bundle.rglob("*") if path.is_file()}
+            self.assertEqual(exported, set(bench.SPACE_MANAGED_FILES))
+            for name, digest in bench.SPACE_STATIC_ASSETS.items():
+                self.assertEqual(bench.sha256_bytes((bundle / name).read_bytes()), digest)
+                self.assertEqual((bundle / name).read_bytes(), (HERE / name).read_bytes())
             payload = (bundle / "results.json").read_bytes()
             self.assertIn(bench.sha256_bytes(payload).encode(), (bundle / "index.html").read_bytes())
             report = json.loads(next((workdir / "evidence").glob("*.json")).read_text())
             self.assertEqual(report["overall"], "AUDIT_VERIFIED")
             self.assertEqual(report["layers"]["source_authenticity"]["state"], "SIGNATURE_PRESENT_NOT_VERIFIED")
             self.assertEqual(report["layers"]["bundle_export"]["sha256"]["results.json"], bench.sha256_bytes(payload))
+            self.assertEqual(report["layers"]["bundle_export"]["file_count"], len(bench.SPACE_MANAGED_FILES))
             self.assertEqual(report["layers"]["publication"]["state"], "NOT_RUN_AUDIT_ONLY")
             with self.assertRaises(bench.BenchError):
                 bench.export_space_bundle(args, workdir, payload)
@@ -785,16 +861,34 @@ class HubPublicationTests(unittest.TestCase):
             username="betterwithage",
             readme_bytes=None,
             index_template_bytes=(HERE / "szl-bench-suite.index.html").read_bytes(),
+            static_asset_bytes=STATIC_ASSETS,
             managed_parent_files=files,
             download_root=HERE,
         )
+
+    def public_server(self, revision_files: object, index_public: object = None):
+        """Serve the Space files at ``revision_files()`` like the static host, with revision headers."""
+
+        def http_get(url: str, **_: object) -> tuple[bytes, dict[str, str]]:
+            path, _, query = url.partition("?")
+            name = path.removeprefix(f"{bench.SPACE_URL}/")
+            revision = query.removeprefix("run=")
+            files = revision_files(revision)
+            kinds = {".json": "application/json", ".html": "text/html", ".css": "text/css", ".woff2": "font/woff2"}
+            headers = {"Content-Type": kinds[pathlib.PurePosixPath(name).suffix], "X-Repo-Commit": revision}
+            body = files[name]
+            if name == "index.html" and index_public is not None:
+                body = index_public(body)
+            return body, headers
+
+        return http_get
 
     def test_noop_publication_still_verifies_stable_head_and_public_bytes(self) -> None:
         parent = "a" * 40
         payload = b'{"fixture":"stable"}\n'
         template = (HERE / "szl-bench-suite.index.html").read_bytes()
         index = bench.finalize_space_index(template, payload)
-        files = {"README.md": (HERE / "szl-bench-suite.README.md").read_bytes(), "index.html": index, "results.json": payload}
+        files = {"README.md": (HERE / "szl-bench-suite.README.md").read_bytes(), "index.html": index, "results.json": payload, **STATIC_ASSETS}
         api = _FakeHubApi(parent, files)
         injection = (
             bench.HF_STATIC_INDEX_INJECTION_PREFIX
@@ -802,14 +896,12 @@ class HubPublicationTests(unittest.TestCase):
             + bench.HF_STATIC_INDEX_INJECTION_SUFFIX
         )
         public_index = index.replace(b"<head>", b"<head>" + injection, 1)
+        requested: list[str] = []
 
-        def http_get(url: str, **_: object) -> tuple[bytes, dict[str, str]]:
-            name = "results.json" if "results.json" in url else "index.html"
-            self.assertEqual(url, f"{bench.SPACE_URL}/{name}?run={parent}")
-            headers = {"Content-Type": "application/json" if name == "results.json" else "text/html"}
-            if name == "results.json":
-                headers["X-Repo-Commit"] = parent
-            return (payload, headers) if name == "results.json" else (public_index, headers)
+        def http_get(url: str, **kwargs: object) -> tuple[bytes, dict[str, str]]:
+            requested.append(url)
+            self.assertTrue(url.endswith(f"?run={parent}"))
+            return self.public_server(lambda revision: api.revisions[revision], lambda _body: public_index)(url, **kwargs)
 
         with fake_hub(api, http_get):
             result = bench.publish_and_witness(self.context(api, parent, files), payload, provider_timeout=0.1, public_http_deadline=0.1)
@@ -820,15 +912,46 @@ class HubPublicationTests(unittest.TestCase):
         self.assertEqual(result["public_index_transform"], "HF_STATIC_CREATOR_METADATA_V1")
         self.assertEqual(result["public_index_normalized_sha256"], bench.sha256_bytes(index))
         self.assertEqual(result["public_index_sha256"], bench.sha256_bytes(public_index))
+        self.assertEqual(result["public_static_asset_sha256"], dict(bench.SPACE_STATIC_ASSETS))
+        self.assertEqual(result["immutable_static_asset_sha256"], dict(bench.SPACE_STATIC_ASSETS))
+        self.assertEqual({url.split("?", 1)[0].removeprefix(f"{bench.SPACE_URL}/") for url in requested},
+                         {"index.html", "results.json", *bench.SPACE_STATIC_ASSETS})
         self.assertEqual(api.commits, 0)
         self.assertEqual(api.restarts, 0)
+
+    def test_first_kanchay_publication_commits_and_witnesses_vendored_assets(self) -> None:
+        parent = "a" * 40
+        payload = b'{"fixture":"stable"}\n'
+        legacy = {"README.md": (HERE / "szl-bench-suite.README.md").read_bytes(), "index.html": b"legacy-index", "results.json": payload}
+        api = _FakeHubApi(parent, legacy)
+        parent_files = {name: legacy.get(name) for name in bench.SPACE_MANAGED_FILES}
+        with fake_hub(api, self.public_server(lambda revision: api.revisions[revision])):
+            result = bench.publish_and_witness(self.context(api, parent, parent_files), payload, provider_timeout=0.1, public_http_deadline=0.1)
+        self.assertTrue(result["changed"])
+        self.assertEqual(api.commits, 1)
+        published = api.revisions[result["commit"]]
+        self.assertEqual(set(published), set(bench.SPACE_MANAGED_FILES))
+        for name, data in STATIC_ASSETS.items():
+            self.assertEqual(published[name], data)
+        self.assertEqual(result["public_static_asset_sha256"], dict(bench.SPACE_STATIC_ASSETS))
+
+    def test_tampered_context_assets_abort_before_remote_mutation(self) -> None:
+        parent = "a" * 40
+        files = {"README.md": b"old", "index.html": b"old", "results.json": b"old"}
+        api = _FakeHubApi(parent, files)
+        context = self.context(api, parent, files)
+        context.static_asset_bytes = {**STATIC_ASSETS, "kanchay/kanchay.css": b"tampered"}
+        with fake_hub(api, lambda *_args, **_kwargs: (b"", {})):
+            with self.assertRaisesRegex(bench.BenchError, "reviewed digests"):
+                bench.publish_and_witness(context, b"{}\n", provider_timeout=0.01, public_http_deadline=0.01)
+        self.assertEqual(api.commits, 0)
 
     def test_unchanged_static_terminal_state_is_explicit_and_never_restarted(self) -> None:
         parent = "a" * 40
         payload = b'{"fixture":"stable"}\n'
         template = (HERE / "szl-bench-suite.index.html").read_bytes()
         index = bench.finalize_space_index(template, payload)
-        files = {"README.md": (HERE / "szl-bench-suite.README.md").read_bytes(), "index.html": index, "results.json": payload}
+        files = {"README.md": (HERE / "szl-bench-suite.README.md").read_bytes(), "index.html": index, "results.json": payload, **STATIC_ASSETS}
         for stage in ("STOPPED", "PAUSED", "SLEEPING", "BUILD_ERROR", "RUNTIME_ERROR", "CONFIG_ERROR"):
             with self.subTest(stage=stage):
                 api = _FakeHubApi(parent, files)
@@ -849,18 +972,12 @@ class HubPublicationTests(unittest.TestCase):
         payload = b'{"fixture":"stable"}\n'
         template = (HERE / "szl-bench-suite.index.html").read_bytes()
         index = bench.finalize_space_index(template, payload)
-        files = {"README.md": (HERE / "szl-bench-suite.README.md").read_bytes(), "index.html": index, "results.json": payload}
+        files = {"README.md": (HERE / "szl-bench-suite.README.md").read_bytes(), "index.html": index, "results.json": payload, **STATIC_ASSETS}
         api = _FakeHubApi(parent, files)
         observations = iter(("BUILDING", "BUILDING", "RUNNING", "RUNNING"))
         api.get_space_runtime = lambda **_: types.SimpleNamespace(stage=next(observations))
 
-        def http_get(url: str, **_: object) -> tuple[bytes, dict[str, str]]:
-            headers = {"Content-Type": "application/json" if "results.json" in url else "text/html"}
-            if "results.json" in url:
-                headers["X-Repo-Commit"] = parent
-            return (payload, headers) if "results.json" in url else (index, headers)
-
-        with fake_hub(api, http_get), mock.patch.object(bench.time, "sleep"):
+        with fake_hub(api, self.public_server(lambda revision: api.revisions[revision])), mock.patch.object(bench.time, "sleep"):
             result = bench.publish_and_witness(self.context(api, parent, files), payload, provider_timeout=0.1, public_http_deadline=0.1)
         self.assertFalse(result["changed"])
         self.assertEqual(result["provider_stage"], "RUNNING")
@@ -872,7 +989,7 @@ class HubPublicationTests(unittest.TestCase):
         payload = b'{"fixture":"stable"}\n'
         template = (HERE / "szl-bench-suite.index.html").read_bytes()
         index = bench.finalize_space_index(template, payload)
-        files = {"README.md": (HERE / "szl-bench-suite.README.md").read_bytes(), "index.html": index, "results.json": payload}
+        files = {"README.md": (HERE / "szl-bench-suite.README.md").read_bytes(), "index.html": index, "results.json": payload, **STATIC_ASSETS}
         api = _FakeHubApi(parent, files)
         api.stage = "PAUSED"
 

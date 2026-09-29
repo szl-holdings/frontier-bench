@@ -94,7 +94,21 @@ HF_STATIC_CREATOR_USER_ID = "69ec7d565e5561c3b16baba8"
 MAX_HF_STATIC_INDEX_INJECTION_BYTES = 512
 # Updated deliberately whenever either reviewed publication asset changes.
 SPACE_README_SHA256 = "c3d6f9c45e81db69dacd79dab23c0fa2b67abea0a0d22b23f051c4ca0ab347e9"
-SPACE_INDEX_TEMPLATE_SHA256 = "45d8fb2f202075b9c6093fc3c8e4cc6433d6c9033c1b38fba1dcf59bd9f1b309"
+SPACE_INDEX_TEMPLATE_SHA256 = "8e1d4627d0c53138442f5509f6ed6e842510ff2d56f52701af1c52d3e3c2b29e"
+# SZL Kanchay v1.0.0 design-system files served beside index.html. They are
+# byte-for-byte copies of szl-holdings/szl-brand kanchay/ (digests from its
+# SOURCE.json), vendored under deploy/bench-plane/kanchay/ and published at the
+# same relative paths. Presentation only: they carry no data or evidence.
+SPACE_STATIC_ASSETS: Mapping[str, str] = {
+    "kanchay/SOURCE.json": "f1bc16257b85faf712639b226cff6678cae4fe8eca8960a9ef783373c3ad0219",
+    "kanchay/kanchay.css": "d083a2ca219f29164d793e243b466320f27a37080b30384f93a8c0db6313d98b",
+    "kanchay/kanchay-components.css": "77a6493edc9a25392caf36a97bdb51f767b8add2936c1511fbe006bbb1031f66",
+    "kanchay/fonts/Inter-latin.woff2": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62",
+    "kanchay/fonts/JetBrainsMono-latin.woff2": "83c005d49d8a6a50474c73a5a36ac0468076e9c4a29da7bdb14995d80560a5be",
+    "kanchay/fonts/SpaceGrotesk-latin.woff2": "0640890476fc1198ab4de571fb658de443c4d85b66466ec09534a8737ab1ce9d",
+}
+SPACE_CORE_FILES: tuple[str, ...] = ("README.md", "index.html", "results.json")
+SPACE_MANAGED_FILES: tuple[str, ...] = SPACE_CORE_FILES + tuple(SPACE_STATIC_ASSETS)
 
 
 EXIT_CLI = 2
@@ -2091,6 +2105,7 @@ class HubContext:
     username: str
     readme_bytes: bytes | None
     index_template_bytes: bytes
+    static_asset_bytes: Mapping[str, bytes]
     managed_parent_files: Mapping[str, bytes | None]
     download_root: pathlib.Path
 
@@ -2167,6 +2182,23 @@ def finalize_space_index(template: bytes, payload_bytes: bytes) -> bytes:
     return rendered
 
 
+def load_space_static_assets(index_path: pathlib.Path, *, phase: str, exit_code: int) -> dict[str, bytes]:
+    """Read the vendored static assets that ship beside the reviewed index template.
+
+    Each file must be a regular, non-link file whose SHA-256 equals its reviewed pin.
+    """
+    root = pathlib.Path(os.path.abspath(index_path)).parent
+    assets: dict[str, bytes] = {}
+    for name, expected in SPACE_STATIC_ASSETS.items():
+        path = root.joinpath(*name.split("/"))
+        _reject_link_components(path, phase=phase, exit_code=exit_code)
+        data = read_bounded_regular_file(path, limit=MAX_HTTP_BYTES, phase=phase, exit_code=exit_code)
+        if not hmac.compare_digest(sha256_bytes(data), expected):
+            raise BenchError(phase, f"vendored Space asset {name} does not match its reviewed digest", exit_code)
+        assets[name] = data
+    return assets
+
+
 def export_space_bundle(args: argparse.Namespace, workdir: pathlib.Path, payload_bytes: bytes) -> Mapping[str, Any]:
     """Export verified audit output for a separately authorized sole publisher."""
     if not args.audit_only or not args.space_readme or not args.space_index:
@@ -2184,14 +2216,21 @@ def export_space_bundle(args: argparse.Namespace, workdir: pathlib.Path, payload
         phase="bundle_export",
         exit_code=EXIT_RESULT,
     )
+    index_path = pathlib.Path(os.path.abspath(pathlib.Path(args.space_index).expanduser()))
     template = read_bounded_regular_file(
-        pathlib.Path(os.path.abspath(pathlib.Path(args.space_index).expanduser())),
+        index_path,
         limit=MAX_HTTP_BYTES,
         phase="bundle_export",
         exit_code=EXIT_RESULT,
     )
     validate_static_space_readme(readme)
-    desired = {"README.md": readme, "index.html": finalize_space_index(template, payload_bytes), "results.json": payload_bytes}
+    assets = load_space_static_assets(index_path, phase="bundle_export", exit_code=EXIT_RESULT)
+    desired = {
+        "README.md": readme,
+        "index.html": finalize_space_index(template, payload_bytes),
+        "results.json": payload_bytes,
+        **assets,
+    }
     ensure_private_directory(target.parent, phase="bundle_export", exit_code=EXIT_RESULT)
     try:
         target.mkdir(mode=0o700)
@@ -2199,8 +2238,10 @@ def export_space_bundle(args: argparse.Namespace, workdir: pathlib.Path, payload
         raise BenchError("bundle_export", f"could not reserve a new bundle directory: {redact(exc)}", EXIT_RESULT) from exc
     hashes: dict[str, str] = {}
     for name, data in desired.items():
-        atomic_write(target / name, data)
-        observed = read_bounded_regular_file(target / name, limit=MAX_HTTP_BYTES, phase="bundle_export", exit_code=EXIT_RESULT)
+        destination = target.joinpath(*name.split("/"))
+        ensure_private_directory(destination.parent, phase="bundle_export", exit_code=EXIT_RESULT)
+        atomic_write(destination, data)
+        observed = read_bounded_regular_file(destination, limit=MAX_HTTP_BYTES, phase="bundle_export", exit_code=EXIT_RESULT)
         if not hmac.compare_digest(sha256_bytes(observed), sha256_bytes(data)):
             raise BenchError("bundle_export", f"exported {name} differs from the verified audit payload", EXIT_RESULT)
         hashes[name] = sha256_bytes(observed)
@@ -2247,6 +2288,7 @@ def hub_preflight(args: argparse.Namespace, download_root: pathlib.Path) -> HubC
     require_regular_file(index_path, phase="hub_auth", exit_code=EXIT_HUB_AUTH)
     index_bytes = read_bounded_regular_file(index_path, limit=MAX_HTTP_BYTES, phase="hub_auth", exit_code=EXIT_HUB_AUTH)
     validate_space_index_template(index_bytes)
+    static_assets = load_space_static_assets(index_path, phase="hub_auth", exit_code=EXIT_HUB_AUTH)
     current_sdk = _space_sdk(info)
     if current_sdk != "static" and readme_bytes is None:
         raise BenchError(
@@ -2260,7 +2302,7 @@ def hub_preflight(args: argparse.Namespace, download_root: pathlib.Path) -> HubC
         raise BenchError("hub_auth", f"could not inventory Space files at immutable parent: {redact(exc)}", EXIT_HUB_AUTH) from exc
     download_root = ensure_private_directory(download_root, phase="hub_readback", exit_code=EXIT_HUB_READBACK)
     managed: dict[str, bytes | None] = {}
-    for filename in ("README.md", "index.html", "results.json"):
+    for filename in SPACE_MANAGED_FILES:
         managed[filename] = (
             _download_hub_file_strict(SPACE_ID, filename, parent, token, download_root)
             if filename in files
@@ -2279,6 +2321,7 @@ def hub_preflight(args: argparse.Namespace, download_root: pathlib.Path) -> HubC
         username=username,
         readme_bytes=readme_bytes,
         index_template_bytes=index_bytes,
+        static_asset_bytes=static_assets,
         managed_parent_files=managed,
         download_root=download_root,
     )
@@ -2412,6 +2455,35 @@ def require_live_revision_header(
     return values[0]
 
 
+def verify_public_static_assets(
+    base_url: str,
+    revision: str,
+    assets: Mapping[str, bytes],
+    *,
+    phase: str = "public_runtime",
+    exit_code: int = EXIT_PROVIDER,
+) -> dict[str, str]:
+    """Require every vendored asset to be served by the live host itself, byte for byte.
+
+    Redirects are refused (a CDN hop would also be blocked by the page's
+    ``'self'`` style and font policy), stylesheets must be served as text/css,
+    and each response must name the expected immutable Space revision.
+    """
+    observed_hashes: dict[str, str] = {}
+    for name, expected in assets.items():
+        observed, headers = http_get_bytes(
+            f"{base_url.rstrip('/')}/{name}?run={revision}", timeout=15, max_bytes=MAX_HTTP_BYTES
+        )
+        content_type = next((str(value) for key, value in headers.items() if str(key).lower() == "content-type"), "")
+        if name.endswith(".css") and "text/css" not in content_type.lower():
+            raise BenchError(phase, f"public {name} has the wrong content type", exit_code)
+        require_live_revision_header(headers, revision, phase=phase, exit_code=exit_code)
+        if not hmac.compare_digest(sha256_bytes(observed), sha256_bytes(expected)):
+            raise BenchError(phase, f"public {name} differs from the reviewed vendored asset", exit_code)
+        observed_hashes[name] = sha256_bytes(observed)
+    return observed_hashes
+
+
 def publish_and_witness(
     context: HubContext,
     payload_bytes: bytes,
@@ -2425,15 +2497,22 @@ def publish_and_witness(
         raise BenchError("hub_commit", "huggingface_hub lacks required commit operations", EXIT_HUB_COMMIT) from exc
 
     index_bytes = finalize_space_index(context.index_template_bytes, payload_bytes)
-    desired: dict[str, bytes | None] = dict(context.managed_parent_files)
+    static_assets = dict(context.static_asset_bytes)
+    if set(static_assets) != set(SPACE_STATIC_ASSETS) or any(
+        not hmac.compare_digest(sha256_bytes(data), SPACE_STATIC_ASSETS[name]) for name, data in static_assets.items()
+    ):
+        raise BenchError("hub_commit", "vendored Space assets do not match their reviewed digests", EXIT_HUB_COMMIT)
+    parent_files: dict[str, bytes | None] = {name: context.managed_parent_files.get(name) for name in SPACE_MANAGED_FILES}
+    desired: dict[str, bytes | None] = dict(parent_files)
     desired["results.json"] = payload_bytes
     desired["index.html"] = index_bytes
+    desired.update(static_assets)
     if context.readme_bytes is not None:
         desired["README.md"] = context.readme_bytes
 
     def operations_between(current: Mapping[str, bytes | None], target: Mapping[str, bytes | None]) -> list[Any]:
         operations: list[Any] = []
-        for filename in ("README.md", "index.html", "results.json"):
+        for filename in SPACE_MANAGED_FILES:
             before, after = current.get(filename), target.get(filename)
             if before == after:
                 continue
@@ -2477,7 +2556,7 @@ def publish_and_witness(
             current_head, _ = head_stage()
             if current_head != commit_sha:
                 return {"state": "CONCURRENT_DRIFT_REMOTE_MUTATED", "expected_head": commit_sha, "observed_head": current_head}
-            rollback_ops = operations_between(desired, context.managed_parent_files)
+            rollback_ops = operations_between(desired, parent_files)
             rollback = context.api.create_commit(
                 repo_id=SPACE_ID,
                 repo_type="space",
@@ -2488,7 +2567,7 @@ def publish_and_witness(
             rollback_sha = str(getattr(rollback, "oid", "") or getattr(rollback, "commit_id", ""))
             if not COMMIT_RE.fullmatch(rollback_sha):
                 raise RuntimeError("rollback did not return an immutable commit")
-            verify_revision(rollback_sha, context.managed_parent_files)
+            verify_revision(rollback_sha, parent_files)
             deadline = time.monotonic() + provider_timeout
             final_head, final_stage = "", "UNKNOWN"
             while time.monotonic() < deadline:
@@ -2513,7 +2592,7 @@ def publish_and_witness(
             EXIT_HUB_COMMIT,
             detail={"captured_parent": context.parent_sha, "observed_head": refreshed_head},
         )
-    operations = operations_between(context.managed_parent_files, desired)
+    operations = operations_between(parent_files, desired)
     commit_sha = context.parent_sha
     mutated = False
     if operations:
@@ -2601,6 +2680,7 @@ def publish_and_witness(
         public_bytes: bytes | None = None
         public_index: bytes | None = None
         public_index_evidence: dict[str, str | None] | None = None
+        public_asset_hashes: dict[str, str] = {}
         while time.monotonic() < public_deadline:
             try:
                 public_bytes, results_headers = http_get_bytes(
@@ -2613,6 +2693,7 @@ def publish_and_witness(
                     raise BenchError("public_runtime", "public results payload digest mismatch", EXIT_PROVIDER)
                 require_live_revision_header(results_headers, commit_sha)
                 public_index_evidence = verify_live_static_index(index_bytes, public_index)
+                public_asset_hashes = verify_public_static_assets(SPACE_URL, commit_sha, static_assets)
                 break
             except BenchError as exc:
                 last_error = str(exc)
@@ -2650,7 +2731,9 @@ def publish_and_witness(
         "immutable_readback_sha256": immutable_hashes["results.json"],
         "immutable_index_sha256": immutable_hashes["index.html"],
         "immutable_readme_sha256": immutable_hashes["README.md"],
+        "immutable_static_asset_sha256": {name: immutable_hashes[name] for name in SPACE_STATIC_ASSETS},
         "provider_stage": "RUNNING",
+        "public_static_asset_sha256": public_asset_hashes,
         "public_results_sha256": sha256_bytes(public_bytes or b""),
         "public_results_revision": commit_sha,
         "public_index_sha256": (public_index_evidence or {}).get("raw_sha256"),
@@ -2886,6 +2969,7 @@ def execute(args: argparse.Namespace) -> int:
                 results_sha256=publication["immutable_readback_sha256"],
                 index_sha256=publication["immutable_index_sha256"],
                 readme_sha256=publication["immutable_readme_sha256"],
+                static_asset_sha256=publication["immutable_static_asset_sha256"],
                 first_head_observation=publication["first_head_observation"],
                 final_head_observation=publication["final_head_observation"],
             )
@@ -2896,6 +2980,7 @@ def execute(args: argparse.Namespace) -> int:
                 url=publication["space_url"],
                 results_sha256=publication["public_results_sha256"],
                 index_sha256=publication["public_index_sha256"],
+                static_asset_sha256=publication["public_static_asset_sha256"],
                 witnessed_at=publication["witnessed_at"],
             )
             report.finish("PUBLISHED_EVIDENCE_SURFACE_OPERATIONAL", 0)
