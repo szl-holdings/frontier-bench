@@ -6,28 +6,27 @@
     <meta name="color-scheme" content="dark">
     <meta name="description" content="Receipted SZL engine, retrieval, and quantization evidence.">
     <title>SZL Bench Suite</title>
-    <link rel="stylesheet" href="kanchay/kanchay.css">
+    <link rel="icon" type="image/svg+xml" href="szl/logos/szl_favicon.svg">
+    <link rel="stylesheet" href="szl/szl-design-system.css">
     <link rel="stylesheet" href="style.css">
     <script src="app.js" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#evidence">Skip to evidence</a>
-    <header class="hero">
-      <nav class="nav" aria-label="Primary">
-        <a class="brand" href="./" aria-label="SZL Bench Suite home">
-          <svg class="brand-mark" width="28" height="28" viewBox="0 0 32 32" fill="none" aria-hidden="true" focusable="false"><rect x="1" y="1" width="30" height="30" rx="7" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9 9 L23 9 L9 23 L23 23" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" fill="none"/><circle cx="9" cy="9" r="2.1" fill="currentColor"/><circle cx="23" cy="23" r="2.1" fill="currentColor"/></svg>
-          <span>Bench Suite</span>
-        </a>
-        <a class="source-link" href="https://github.com/szl-holdings/frontier-bench">Source <span aria-hidden="true">→</span></a>
-      </nav>
+    <nav class="nav" aria-label="Primary">
+      <a class="nav__brand" href="./" aria-label="SZL Bench Suite home"><img src="szl/logos/szl_favicon.svg" alt="" width="48" height="28"><span>Bench Suite</span></a>
+      <div class="nav__links"><a class="nav__link" href="https://github.com/szl-holdings/frontier-bench">Source <span aria-hidden="true">→</span></a></div>
+    </nav>
 
-      <div class="hero-grid">
+    <header class="hero">
+      <div class="hero__orbit" aria-hidden="true"></div>
+      <div class="hero__inner hero-grid">
         <div>
           <p class="eyebrow">Public evidence surface</p>
           <h1>Measurements with receipts,<br><span>or no claim at all.</span></h1>
           <p class="lede">One source-bound view of engine, retrieval, and quantization results. Every displayed row passed its owning verifier before publication.</p>
         </div>
-        <aside class="proof-card" aria-label="Publication guarantees">
+        <aside class="proof-card card" aria-label="Publication guarantees">
           <p class="proof-kicker">Publication contract</p>
           <ul>
             <li><span aria-hidden="true">✓</span> Exact source revisions</li>
@@ -58,14 +57,14 @@
         </div>
 
         <div class="tabs" role="tablist" aria-label="Benchmark planes">
-          <button id="tab-engine" role="tab" aria-selected="true" aria-controls="panel-engine" tabindex="0" data-plane="engine">Engine <span id="count-engine">0</span></button>
-          <button id="tab-retrieval" role="tab" aria-selected="false" aria-controls="panel-retrieval" tabindex="-1" data-plane="retrieval">Retrieval <span id="count-retrieval">0</span></button>
-          <button id="tab-quant" role="tab" aria-selected="false" aria-controls="panel-quant" tabindex="-1" data-plane="quant">Quantization <span id="count-quant">0</span></button>
+          <button id="tab-engine" class="btn btn-ghost" role="tab" aria-selected="true" aria-controls="panel-engine" tabindex="0" data-plane="engine">Engine <span id="count-engine">0</span></button>
+          <button id="tab-retrieval" class="btn btn-ghost" role="tab" aria-selected="false" aria-controls="panel-retrieval" tabindex="-1" data-plane="retrieval">Retrieval <span id="count-retrieval">0</span></button>
+          <button id="tab-quant" class="btn btn-ghost" role="tab" aria-selected="false" aria-controls="panel-quant" tabindex="-1" data-plane="quant">Quantization <span id="count-quant">0</span></button>
         </div>
 
-        <div id="panel-engine" class="panel" role="tabpanel" aria-labelledby="tab-engine" data-panel="engine"></div>
-        <div id="panel-retrieval" class="panel" role="tabpanel" aria-labelledby="tab-retrieval" data-panel="retrieval" hidden></div>
-        <div id="panel-quant" class="panel" role="tabpanel" aria-labelledby="tab-quant" data-panel="quant" hidden></div>
+        <div id="panel-engine" class="panel card" role="tabpanel" aria-labelledby="tab-engine" data-panel="engine"></div>
+        <div id="panel-retrieval" class="panel card" role="tabpanel" aria-labelledby="tab-retrieval" data-panel="retrieval" hidden></div>
+        <div id="panel-quant" class="panel card" role="tabpanel" aria-labelledby="tab-quant" data-panel="quant" hidden></div>
       </section>
 
       <section class="provenance" aria-labelledby="provenance-title">

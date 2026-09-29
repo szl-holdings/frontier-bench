@@ -158,19 +158,20 @@ class PublisherTests(unittest.TestCase):
         preflight.assert_not_called()
         publish.assert_not_called()
 
-    def test_valid_bundle_carries_exact_reviewed_kanchay_assets(self) -> None:
+    def test_valid_bundle_carries_exact_reviewed_szl_assets(self) -> None:
         files, _ = publisher.read_bundle(controller, self.bundle)
         self.assertEqual(set(files), publisher.BUNDLE_FILES | set(controller.SPACE_STATIC_ASSETS))
         for name, digest in controller.SPACE_STATIC_ASSETS.items():
             self.assertEqual(controller.sha256_bytes(files[name]), digest)
 
-    def test_tampered_missing_or_extra_kanchay_asset_aborts_before_provider(self) -> None:
-        kanchay = self.bundle / "kanchay"
+    def test_tampered_missing_or_extra_szl_asset_aborts_before_provider(self) -> None:
+        szl = self.bundle / "szl"
         mutations = {
-            "tampered stylesheet": lambda: (kanchay / "kanchay.css").write_bytes(b":root { --color-a11oy-bg: red; }\n"),
-            "missing stylesheet": lambda: (kanchay / "kanchay.css").unlink(),
-            "unreviewed font": lambda: (kanchay / "fonts" / "Syncopate-400.woff2").write_bytes(b"unreviewed"),
-            "unreviewed directory": lambda: (kanchay / "marks").mkdir(),
+            "tampered stylesheet": lambda: (szl / "szl-design-system.css").write_bytes(b":root { --accent: red; }\n"),
+            "missing stylesheet": lambda: (szl / "szl-design-system.css").unlink(),
+            "unreviewed webfont": lambda: (szl / "Inter-latin.woff2").write_bytes(b"unreviewed"),
+            "unreviewed logo": lambda: (szl / "logos" / "szl_logo_primary.svg").write_bytes(b"<svg/>"),
+            "unreviewed directory": lambda: (szl / "fonts").mkdir(),
         }
         for label, mutate in mutations.items():
             with self.subTest(label):
@@ -187,7 +188,7 @@ class PublisherTests(unittest.TestCase):
                 self.report.unlink()
 
     def test_provider_context_assets_must_equal_bundle_assets(self) -> None:
-        self.context.static_asset_bytes = {**self.assets, "kanchay/kanchay.css": b"different"}
+        self.context.static_asset_bytes = {**self.assets, "szl/szl-design-system.css": b"different"}
         code, report, _, preflight, publish = self.invoke()
         self.assertEqual(code, controller.EXIT_RESULT)
         self.assertEqual(report["remote_mutation"], "NOT_ATTEMPTED")
@@ -353,7 +354,7 @@ class AnonymousWitnessTests(unittest.TestCase):
             name = url.split("?", 1)[0].removeprefix(f"{controller.SPACE_URL}/")
             self.assertIn(name, self.files)
             self.assertEqual(url, f"{controller.SPACE_URL}/{name}?run={'a' * 40}")
-            kinds = {".json": "application/json", ".html": "text/html", ".css": "text/css", ".woff2": "font/woff2"}
+            kinds = {".json": "application/json", ".html": "text/html", ".css": "text/css", ".svg": "image/svg+xml"}
             headers = {"Content-Type": kinds[Path(name).suffix]}
             if name != "index.html":
                 headers["X-Repo-Commit"] = "a" * 40
@@ -415,19 +416,19 @@ class AnonymousWitnessTests(unittest.TestCase):
         with self.assertRaisesRegex(controller.BenchError, "differs from the verified bundle"):
             self.invoke(public={**self.files, "results.json": b"different"})
 
-    def test_noop_witnesses_every_public_kanchay_asset(self) -> None:
+    def test_noop_witnesses_every_public_szl_asset(self) -> None:
         outcome = self.invoke()
         expected = {name: controller.sha256_bytes(self.files[name]) for name in controller.SPACE_STATIC_ASSETS}
         self.assertEqual(outcome["public_static_asset_sha256"], expected)
         self.assertEqual(outcome["immutable_static_asset_sha256"], expected)
 
-    def test_missing_remote_kanchay_asset_requires_authenticated_publication(self) -> None:
+    def test_missing_remote_szl_asset_requires_authenticated_publication(self) -> None:
         self.api.list_repo_files.return_value = ["README.md", "index.html", "results.json"]
         self.assertIsNone(self.invoke())
 
-    def test_public_kanchay_asset_mismatch_cannot_be_noop_success(self) -> None:
+    def test_public_szl_asset_mismatch_cannot_be_noop_success(self) -> None:
         with self.assertRaisesRegex(controller.BenchError, "differs from the reviewed vendored asset"):
-            self.invoke(public={**self.files, "kanchay/kanchay.css": b"different"})
+            self.invoke(public={**self.files, "szl/szl-design-system.css": b"different"})
 
     def test_concurrent_head_change_cannot_be_noop_success(self) -> None:
         changed = SimpleNamespace(**{**vars(self.info), "sha": "b" * 40})
