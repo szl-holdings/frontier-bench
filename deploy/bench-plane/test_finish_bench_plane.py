@@ -274,7 +274,7 @@ class ControlTests(unittest.TestCase):
         html = (HERE / "szl-bench-suite.index.html").read_text(encoding="utf-8")
         stylesheets = re.findall(r'<link rel="stylesheet" href="([^"]+)">', html)
         self.assertEqual(stylesheets, ["kanchay/kanchay.css", "kanchay/kanchay-components.css"])
-        self.assertTrue(set(stylesheets) <= set(bench.SPACE_STATIC_ASSETS))
+        self.assertLessEqual(set(stylesheets), set(bench.SPACE_STATIC_ASSETS))
         policy = re.search(r'http-equiv="Content-Security-Policy" content="([^"]+)"', html).group(1)
         directives = {part.split()[0]: part.split()[1:] for part in (item.strip() for item in policy.split(";")) if part}
         self.assertEqual(directives["default-src"], ["'none'"])
@@ -284,7 +284,7 @@ class ControlTests(unittest.TestCase):
         css = (HERE / "kanchay" / "kanchay.css").read_text(encoding="utf-8")
         fonts = re.findall(r"url\('\./(fonts/[^']+)'\)", css)
         self.assertEqual(len(fonts), 3)
-        self.assertTrue({f"kanchay/{font}" for font in fonts} <= set(bench.SPACE_STATIC_ASSETS))
+        self.assertLessEqual({f"kanchay/{font}" for font in fonts}, set(bench.SPACE_STATIC_ASSETS))
 
     def test_space_index_style_uses_tokens_not_color_literals(self) -> None:
         html = (HERE / "szl-bench-suite.index.html").read_text(encoding="utf-8")
