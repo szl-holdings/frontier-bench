@@ -10,4 +10,5 @@
 *.yml text eol=lf
 *.mjs text eol=lf
 deploy/bench-plane/* text eol=lf
-*.woff2 binary
+deploy/bench-plane/szl/** -text
+site/szl/** -text

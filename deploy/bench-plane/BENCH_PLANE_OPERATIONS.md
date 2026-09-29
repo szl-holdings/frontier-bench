@@ -33,10 +33,10 @@ success-printing shell wrapper. It:
 10. performs a reversible fixed-port cutover, attempts restoration after failures and
    interruptions, and reports incomplete restoration as a distinct failure;
 11. for a published run, authenticates the exact Hugging Face user, conditionally commits changed files among
-   `README.md`, `index.html`, `results.json`, and the digest-pinned SZL Kanchay assets
-   under `kanchay/` with a parent-commit precondition,
+   `README.md`, `index.html`, `results.json`, and the digest-pinned SZL design-system
+   assets under `szl/` with a parent-commit precondition,
    reads every managed file back at the immutable commit, waits for the Space to report
-   `RUNNING`, verifies the public bytes (including every Kanchay asset, served by the
+   `RUNNING`, verifies the public bytes (including every `szl/` asset, served by the
    Space host itself without a redirect) between two stable head/runtime observations, and
    makes a conditional compensating commit if a post-commit gate fails;
 12. publishes a digest-bound page template: Web Crypto hashes the exact raw
@@ -61,12 +61,13 @@ cannot disable them.
   replaces its single digest placeholder at publication time. Invalid, unavailable,
   or byte-mismatched data is shown as `UNAVAILABLE`, not as an honest empty set;
   unsupported “IN CODE” claims were
-  removed. It is styled with the SZL Kanchay design system and its CSP admits only its
-  own hashed inline style plus same-origin stylesheets and fonts.
-- `kanchay/` — SZL Kanchay v1.0.0 (`kanchay.css`, `kanchay-components.css`, the three
-  `fonts/` it loads, `SOURCE.json`), byte-for-byte copies of the `szl-holdings/szl-brand`
-  export. `SPACE_STATIC_ASSETS` in the controller pins each file's SHA-256; never edit
-  them here, regenerate in szl-brand and update the pins.
+  removed. It is styled with SZL KANCHAY v1.1.0 (founder direction, dark operator
+  surface); its CSP admits only its own hashed inline style and script plus same-origin
+  stylesheets and images. No webfonts are loaded: the design system uses font stacks.
+- `szl/` — `szl-design-system.css`, `logos/szl_favicon.svg` and `SOURCE.json`, byte-for-byte
+  copies of the `szl-holdings/szl-brand` `kanchay/` bundle at aa876fa (marked `-text` in `.gitattributes`
+  so Git never rewrites their bytes). `SPACE_STATIC_ASSETS` in the controller pins
+  each file's SHA-256; never edit them here, regenerate in szl-brand and update the pins.
 - Local audit reports are generated under the selected work directory; workstation
   paths and machine inventories are not committed to this package.
 
@@ -198,7 +199,7 @@ primitive is required for true pre-publication runtime validation.
 
 `frontier-bench` is the sole canonical publisher. Its workflow now uses the reviewed
 controller to export `README.md`, `index.html`, `results.json`, and the pinned
-`kanchay/` design-system assets with `--audit-only --export-space-bundle DIRECTORY`. The new export directory must be inside
+`szl/` design-system assets with `--audit-only --export-space-bundle DIRECTORY`. The new export directory must be inside
 the dedicated work directory. This path requires both reviewed Space assets and makes
 no Docker or Hugging Face changes.
 
