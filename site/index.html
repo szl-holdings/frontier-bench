@@ -23,15 +23,15 @@
       <div class="hero__inner hero-grid">
         <div>
           <p class="eyebrow">Public evidence surface</p>
-          <h1>Measurements with receipts,<br><span>or no claim at all.</span></h1>
-          <p class="lede">One source-bound view of engine, retrieval, and quantization results. Every displayed row passed its owning verifier before publication.</p>
+          <h1>Benchmark assertions,<br><span>with their limits visible.</span></h1>
+          <p class="lede">Generic engine, retrieval, and quantization inputs remain UNVERIFIED. Displayed values and source revisions are caller assertions, not authenticated measurements.</p>
         </div>
-        <aside class="proof-card card" aria-label="Publication guarantees">
-          <p class="proof-kicker">Publication contract</p>
+        <aside class="proof-card card" aria-label="Evidence limits">
+          <p class="proof-kicker">Evidence limits</p>
           <ul>
-            <li><span aria-hidden="true">✓</span> Exact source revisions</li>
-            <li><span aria-hidden="true">✓</span> Independent receipt verification</li>
-            <li><span aria-hidden="true">✓</span> One atomic provider commit</li>
+            <li>Caller-declared source revisions</li>
+            <li>Receipt digests do not prove authenticity</li>
+            <li>No authenticated admission on this surface</li>
           </ul>
         </aside>
       </div>
@@ -39,19 +39,19 @@
 
     <main id="evidence">
       <section class="status-strip" aria-label="Current publication status">
-        <div><span class="status-dot" aria-hidden="true"></span><span id="load-state">Loading verified evidence…</span></div>
+        <div><span class="status-dot" aria-hidden="true"></span><span id="load-state">Loading generic assertions…</span></div>
         <dl>
-          <div><dt>Receipts</dt><dd id="receipt-count">—</dd></div>
-          <div><dt>Sources</dt><dd id="source-count">—</dd></div>
-          <div><dt>Evidence through</dt><dd id="published-at">—</dd></div>
+          <div><dt>Assertions</dt><dd id="receipt-count">—</dd></div>
+          <div><dt>Declared sources</dt><dd id="source-count">—</dd></div>
+          <div><dt>Declared generation time</dt><dd id="published-at">—</dd></div>
         </dl>
       </section>
 
       <section class="evidence-section" aria-labelledby="evidence-title">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">Verified results</p>
-            <h2 id="evidence-title">Three planes. One truth standard.</h2>
+            <p class="eyebrow">Unverified assertions</p>
+            <h2 id="evidence-title">Three planes. No implied admission.</h2>
           </div>
           <p>Empty planes remain visibly empty. BLOCKED, UNAVAILABLE, and unmeasured data are never promoted into benchmark claims.</p>
         </div>
@@ -70,8 +70,8 @@
       <section class="provenance" aria-labelledby="provenance-title">
         <div>
           <p class="eyebrow">Reproducibility</p>
-          <h2 id="provenance-title">Bound to what actually ran.</h2>
-          <p>The publisher checks out each evidence repository, runs its verifier, and records the exact 40-character revision beside the admitted results.</p>
+          <h2 id="provenance-title">Declared sources.</h2>
+          <p>These links identify caller-supplied repository revisions. Their presence does not establish where a result came from or what actually ran.</p>
         </div>
         <div id="source-list" class="source-list" aria-live="polite"></div>
       </section>
@@ -79,7 +79,7 @@
 
     <footer>
       <p>SZL Holdings · Truthful systems engineering</p>
-      <p id="deployment-state">Deployment receipt loading…</p>
+      <p id="deployment-state">Result files loading…</p>
     </footer>
   </body>
 </html>

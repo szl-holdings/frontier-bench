@@ -1,7 +1,8 @@
 """frontier-bench API — honest engine-bench surface.
 
-Serves only hash-chain-verified MEASURED rows exported by tools/sync_results.py.
-When no verified results exist, state is EMPTY_HONEST — never fabricated data.
+Serves generic engine assertions without authenticating their measurement claims.
+Nonempty input remains UNVERIFIED, including caller-declared MEASURED rows.
+Valid empty input is EMPTY_HONEST; unreadable or malformed input is UNAVAILABLE.
 """
 import json
 import os
@@ -23,10 +24,27 @@ def load_rows():
     try:
         with open(RESULTS, encoding="utf-8") as f:
             data = json.load(f)
-        rows = [r for r in data.get("results", []) if r.get("plane") == PLANE]
-        return rows, data.get("generated_at")
-    except Exception:
-        return [], None
+        if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+            raise ValueError("invalid result collection")
+        if type(data.get("count")) is not int or data["count"] != len(data["results"]):
+            raise ValueError("result count mismatch")
+        if not isinstance(data.get("generated_at"), str) or not data["generated_at"].strip():
+            raise ValueError("missing generation time")
+        rows = []
+        for row in data["results"]:
+            if not isinstance(row, dict) or row.get("plane") not in ("engine", "retrieval", "quant"):
+                raise ValueError("invalid result row")
+            if row["plane"] == PLANE:
+                # This endpoint has no authenticated admission boundary. Neither
+                # local-file presence, a digest, nor caller truth flags add one.
+                assertion = {key: row[key] for key in (
+                    "plane", "machine", "measured_at", "method", "metrics", "receipt"
+                ) if key in row}
+                assertion["status"] = "UNVERIFIED"
+                rows.append(assertion)
+        return rows, data["generated_at"], "UNVERIFIED" if rows else "EMPTY_HONEST"
+    except (OSError, ValueError):
+        return [], None, "UNAVAILABLE"
 
 
 @app.get("/healthz")
@@ -36,10 +54,12 @@ def healthz():
 
 @app.get("/api/results")
 def results():
-    rows, generated_at = load_rows()
+    rows, generated_at, state = load_rows()
     return {
         "plane": PLANE,
-        "state": "MEASURED" if rows else "EMPTY_HONEST",
+        "state": state,
+        "authenticity": "UNVERIFIED",
+        "results_are_measured_only": False,
         "generated_at": generated_at,
         "count": len(rows),
         "results": rows,

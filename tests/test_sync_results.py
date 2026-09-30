@@ -1,8 +1,8 @@
 import importlib.util
-import hashlib
 import json
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -36,7 +36,7 @@ class SyncResultsTests(unittest.TestCase):
             "prev_hash": "0" * 64,
             "status": "BLOCKED",
         }
-        receipt["hash"] = MODULE.verify.__globals__["digest"](receipt)
+        receipt["hash"] = MODULE.verify_snapshots.__globals__["digest"](receipt)
         (self.receipts / "000-genesis.json").write_text(
             json.dumps(receipt), encoding="utf-8"
         )
@@ -57,10 +57,49 @@ class SyncResultsTests(unittest.TestCase):
         self.assertEqual(0, payload["count"])
         self.assertEqual([], payload["results"])
         self.assertEqual("2026-09-04T00:00:00Z", payload["generated_at"])
-        self.assertEqual(
-            "3a5d18bda9ddb69c49bb330c777ef266246f92d13f3f34f85dd8c5536d5b3128",
-            hashlib.sha256(self.output.read_bytes()).hexdigest(),
-        )
+        self.assertEqual("UNVERIFIED", payload["provenance"]["authenticity"])
+        self.assertFalse(payload["provenance"]["results_are_measured_only"])
+
+    def test_replacement_after_verification_does_not_change_export(self):
+        self.write_genesis("engine")
+        path = self.receipts / "000-genesis.json"
+        receipt = json.loads(path.read_text())
+        receipt.update(status="MEASURED", metrics={"value": 1})
+        receipt["hash"] = MODULE.verify_snapshots.__globals__["digest"](receipt)
+        path.write_text(json.dumps(receipt))
+        original_verify = MODULE.verify_snapshots
+        original_digest = original_verify.__globals__["digest"]
+
+        def replace_after_read(paths):
+            admitted = original_verify(paths)
+            replacement = dict(receipt, metrics={"value": 999})
+            replacement["hash"] = original_digest(replacement)
+            path.write_text(json.dumps(replacement))
+            return admitted
+
+        with mock.patch.object(MODULE, "verify_snapshots", side_effect=replace_after_read):
+            self.assertEqual(0, MODULE.main(str(self.receipts), str(self.output), "engine"))
+        row = json.loads(self.output.read_text())["results"][0]
+        self.assertEqual({"value": 1}, row["metrics"])
+        self.assertEqual(receipt["hash"], row["receipt"])
+        self.assertEqual("UNVERIFIED", row["status"])
+
+    def test_write_failures_preserve_existing_output(self):
+        self.write_genesis("engine")
+        for operation in ("fsync", "replace"):
+            with self.subTest(operation=operation):
+                self.output.write_bytes(b"historic artifact")
+                with mock.patch.object(MODULE.os, operation, side_effect=OSError("synthetic failure")):
+                    self.assertEqual(1, MODULE.main(str(self.receipts), str(self.output), "engine"))
+                self.assertEqual(b"historic artifact", self.output.read_bytes())
+                self.assertEqual([], list(self.root.glob(".*.tmp")))
+
+    def test_bad_receipt_leaves_existing_artifact_intact(self):
+        self.write_genesis("engine")
+        (self.receipts / "001-invalid.json").write_text("[]")
+        self.output.write_bytes(b"historic artifact")
+        self.assertEqual(1, MODULE.main(str(self.receipts), str(self.output), "engine"))
+        self.assertEqual(b"historic artifact", self.output.read_bytes())
 
 
 if __name__ == "__main__":

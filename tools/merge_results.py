@@ -1,9 +1,8 @@
-"""Merge independently verified bench planes into one source-bound payload.
+"""Combine generic bench inputs without authenticating measurement claims.
 
-The canonical ``sync_results.py`` program admits every plane's receipt data.
-This module combines those already-verified JSON outputs, rejects cross-plane
-or duplicate receipts, and records the exact Git revision used for each input
-repository.
+Input digests bind the bytes consumed. Source revisions are caller assertions.
+Neither proves receipt admission or origin: all combined rows stay UNVERIFIED.
+Authenticated publication must use its separately governed admission boundary.
 """
 
 from __future__ import annotations
@@ -12,9 +11,13 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Iterable
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "verify"))
+from verifier import check_values, strict_loads, utc_timestamp  # noqa: E402
 
 
 EXPECTED_PLANES = ("engine", "retrieval", "quant")
@@ -54,25 +57,30 @@ def _parse_source(value: str) -> tuple[str, str]:
 
 def _load_payload(path: Path) -> tuple[dict[str, Any], str]:
     raw = path.read_bytes()
-    payload = json.loads(raw)
+    payload = strict_loads(raw)
     if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
-        raise ValueError(f"invalid verified-result payload: {path}")
-    if payload.get("count") != len(payload["results"]):
-        raise ValueError(f"verified-result count mismatch: {path}")
-    if not isinstance(payload.get("generated_at"), str) or not payload["generated_at"]:
-        raise ValueError(f"verified-result timestamp is missing: {path}")
+        raise ValueError(f"invalid result payload: {path}")
+    if type(payload.get("count")) is not int or payload["count"] != len(payload["results"]):
+        raise ValueError(f"result count mismatch: {path}")
+    utc_timestamp(payload.get("generated_at"))
     return payload, hashlib.sha256(raw).hexdigest()
 
 
 def build_payloads(
-    inputs: dict[str, Path], sources: dict[str, str], generated_at: str
+    inputs: dict[str, Path], sources: dict[str, str], generated_at: str | None = None
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     source_rows: list[dict[str, Any]] = []
     seen_receipts: set[str] = set()
+    timestamps = []
+    if set(inputs) != set(EXPECTED_PLANES) or set(sources) != set(EXPECTED_PLANES):
+        raise ValueError("exact input and source planes required")
+    if generated_at is not None:
+        utc_timestamp(generated_at)
 
     for plane in EXPECTED_PLANES:
         payload, payload_sha256 = _load_payload(inputs[plane])
+        timestamps.append(payload["generated_at"])
         repository, revision = _parse_source(sources[plane])
         if repository != EXPECTED_REPOSITORIES[plane]:
             raise ValueError(
@@ -83,12 +91,15 @@ def build_payloads(
                 "plane": plane,
                 "repository": repository,
                 "revision": revision,
-                "verified_results_sha256": payload_sha256,
+                "input_results_sha256": payload_sha256,
+                "source_identity": "CALLER_ASSERTED",
             }
         )
         for candidate in payload["results"]:
             if not isinstance(candidate, dict) or candidate.get("plane") != plane:
                 raise ValueError(f"{plane} input contains a cross-plane or malformed row")
+            if check_values(candidate, plane) or not candidate["metrics"]:
+                raise ValueError(f"{plane} input contains invalid row values")
             receipt = candidate.get("receipt")
             if (
                 not isinstance(receipt, str)
@@ -99,15 +110,21 @@ def build_payloads(
             if receipt in seen_receipts:
                 raise ValueError(f"duplicate receipt across planes: {receipt}")
             seen_receipts.add(receipt)
-            row = dict(candidate)
+            # Do not carry caller-supplied truth/authentication flags forward.
+            row = {key: candidate[key] for key in (
+                "plane", "machine", "measured_at", "method", "metrics", "receipt"
+            )}
+            row["status"] = "UNVERIFIED"
             row["source_repository"] = repository
             row["source_revision"] = revision
             rows.append(row)
 
+    if generated_at is None:
+        generated_at = max(timestamps, key=utc_timestamp)
     rows.sort(
         key=lambda row: (
             EXPECTED_PLANES.index(row["plane"]),
-            str(row.get("measured_at", "")),
+            utc_timestamp(row["measured_at"]),
             row["receipt"],
         )
     )
@@ -117,6 +134,7 @@ def build_payloads(
         "count": len(rows),
         "results": rows,
         "sources": source_rows,
+        "evidence_state": "UNVERIFIED",
     }
     deployment = {
         "schema": "szl.bench-suite.deployment/v1",
@@ -126,8 +144,10 @@ def build_payloads(
         "sources": source_rows,
         "truth": {
             "receipt_rows": len(rows),
-            "results_are_measured_only": True,
+            "results_are_measured_only": False,
             "unsigned_honest": True,
+            "authenticity": "UNVERIFIED",
+            "receipt_admission": "NOT_CHECKED",
         },
     }
     return results, deployment
@@ -135,7 +155,7 @@ def build_payloads(
 
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    text = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
     descriptor, temporary = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
     )
@@ -164,12 +184,11 @@ def main() -> int:
             for plane, value in _parse_mapping(args.inputs, "input").items()
         }
         sources = _parse_mapping(args.sources, "source")
-        generated_at = max(_load_payload(path)[0]["generated_at"] for path in inputs.values())
-        results, deployment = build_payloads(inputs, sources, generated_at)
+        results, deployment = build_payloads(inputs, sources)
         _write_json_atomic(args.output, results)
         _write_json_atomic(args.deployment_output, deployment)
-    except (OSError, ValueError, json.JSONDecodeError) as error:
-        print(f"publisher merge blocked: {type(error).__name__}: {error}")
+    except (OSError, ValueError, RecursionError):
+        print("result merge blocked: invalid input or output failure")
         return 2
 
     print(

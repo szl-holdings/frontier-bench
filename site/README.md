@@ -11,7 +11,8 @@ short_description: Receipted engine, retrieval, and quantization evidence.
 
 # SZL Bench Suite
 
-This static Space is the public, fail-closed display for independently verified
-engine, retrieval, and quantization receipts. Its publisher binds every result
-to the exact Git revision that supplied it and deploys the complete surface in
-one provider commit.
+This generic surface displays engine, retrieval, and quantization assertions as
+UNVERIFIED. Matching digests, source revisions and caller truth flags do not
+authenticate measurements. Valid empty input stays EMPTY_HONEST; unavailable or
+malformed input makes no result claim. Authenticated publication uses the
+separate admission path in deploy/bench-plane, not this generic consumer.

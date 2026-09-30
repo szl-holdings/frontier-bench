@@ -25,9 +25,9 @@ function emptyPanel(plane) {
   wrapper.className = "empty-state";
   const inner = document.createElement("div");
   const title = document.createElement("strong");
-  title.textContent = `No measured ${labels[plane].toLowerCase()} receipts yet`;
+  title.textContent = `No ${labels[plane].toLowerCase()} assertions supplied`;
   const message = document.createElement("p");
-  message.textContent = "The verification chain is present, but no MEASURED row has been admitted. This is an honest empty state, not a zero score.";
+  message.textContent = "This is an honest empty state, not a zero score or a measurement claim.";
   inner.append(title, message);
   wrapper.append(inner);
   return wrapper;
@@ -40,13 +40,15 @@ function unavailablePanel(plane) {
   const title = document.createElement("strong");
   title.textContent = `${labels[plane]} evidence unavailable`;
   const message = document.createElement("p");
-  message.textContent = "The source-bound publication files could not be loaded or did not match the expected schema. No benchmark claim is shown.";
+  message.textContent = "The generic result files could not be loaded or did not match the expected schema. No benchmark claim is shown.";
   inner.append(title, message);
   wrapper.append(inner);
   return wrapper;
 }
 
 function validatePublication(results, deployment) {
+  // These are structural consistency checks, not authenticated admission.
+  // Caller flags, source revisions and receipt digests cannot establish trust.
   if (results?.schema !== "szl.bench-suite.results/v1" || !Array.isArray(results.results)) {
     throw new Error("results schema mismatch");
   }
@@ -99,14 +101,16 @@ function resultCard(row) {
   });
   const receipt = document.createElement("p");
   receipt.className = "receipt";
-  receipt.textContent = `receipt ${text(row.receipt).slice(0, 16)}…`;
+  receipt.textContent = `UNVERIFIED assertion · receipt ${text(row.receipt).slice(0, 16)}…`;
   card.append(heading, meta, metrics, receipt);
   return card;
 }
 
 function renderResults(payload) {
-  document.querySelector(".status-strip").dataset.state = "verified";
-  document.querySelector("#load-state").textContent = "Verified publication loaded";
+  const nonempty = payload.results.length > 0;
+  document.querySelector(".status-strip").dataset.state = nonempty ? "unverified" : "empty";
+  document.querySelector("#load-state").textContent = nonempty
+    ? "UNVERIFIED assertions loaded" : "EMPTY_HONEST · no assertions supplied";
   document.querySelector("#receipt-count").textContent = String(payload.results.length);
   document.querySelector("#source-count").textContent = String(payload.sources?.length || 0);
   document.querySelector("#published-at").textContent = shortDate(payload.generated_at);
@@ -144,8 +148,13 @@ function renderResults(payload) {
 
 function renderFailure() {
   document.querySelector(".status-strip").dataset.state = "failed";
-  document.querySelector("#load-state").textContent = "Verified evidence unavailable";
+  document.querySelector("#load-state").textContent = "UNAVAILABLE · result files could not be validated";
+  for (const selector of ["#receipt-count", "#source-count", "#published-at"]) {
+    document.querySelector(selector).textContent = "—";
+  }
+  document.querySelector("#source-list").replaceChildren();
   planes.forEach((plane) => {
+    document.querySelector(`#count-${plane}`).textContent = "—";
     const panel = document.querySelector(`[data-panel="${plane}"]`);
     panel.replaceChildren(unavailablePanel(plane));
   });
@@ -188,10 +197,10 @@ async function boot() {
     const [results, deployment] = await Promise.all([resultsResponse.json(), deploymentResponse.json()]);
     validatePublication(results, deployment);
     renderResults(results);
-    document.querySelector("#deployment-state").textContent = `${deployment.publisher} · ${deployment.truth?.receipt_rows ?? 0} measured receipt(s)`;
+    document.querySelector("#deployment-state").textContent = `${results.results.length} unverified assertion(s) · authenticity not established`;
   } catch (error) {
     renderFailure();
-    document.querySelector("#deployment-state").textContent = "Deployment proof unavailable";
+    document.querySelector("#deployment-state").textContent = "Result files unavailable · no measurement claim";
     console.error(error);
   }
 }
