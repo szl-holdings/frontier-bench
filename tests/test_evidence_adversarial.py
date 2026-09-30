@@ -6,8 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import types
-import unittest
-from unittest import mock
+import unittest.mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -151,18 +150,18 @@ class AggregationAdversarialTests(unittest.TestCase):
 class RunnerPlanTests(unittest.TestCase):
     def setUp(self):
         client = types.ModuleType("harness.client")
-        client.health_check = mock.Mock(return_value=True)
-        client.chat_completion = mock.Mock(return_value=RunSample(ok=True, total_s=1, completion_tokens=1))
+        client.health_check = unittest.mock.Mock(return_value=True)
+        client.chat_completion = unittest.mock.Mock(return_value=RunSample(ok=True, total_s=1, completion_tokens=1))
         registry = types.ModuleType("harness.engine_registry")
         registry.REGISTRY = {}
-        registry.available_engines = mock.Mock(return_value={})
-        registry.unavailable_engines = mock.Mock(return_value={})
+        registry.available_engines = unittest.mock.Mock(return_value={})
+        registry.unavailable_engines = unittest.mock.Mock(return_value={})
         spec = importlib.util.spec_from_file_location("synthetic_runner", ROOT / "harness/runner.py")
         self.runner = importlib.util.module_from_spec(spec)
-        with mock.patch.dict(sys.modules, {"harness.client": client, "harness.engine_registry": registry}):
+        with unittest.mock.patch.dict(sys.modules, {"harness.client": client, "harness.engine_registry": registry}):
             spec.loader.exec_module(self.runner)
         self.client = client
-        self.spec = types.SimpleNamespace(resolve_endpoint=mock.Mock(return_value="synthetic://no-network"))
+        self.spec = types.SimpleNamespace(resolve_endpoint=unittest.mock.Mock(return_value="synthetic://no-network"))
 
     def test_invalid_plan_never_resolves_endpoint_or_calls_client(self):
         for prompts, repeats in (([], 1), (["fixture"], 0), (["fixture"], -1),
