@@ -121,7 +121,7 @@ def build_payloads(
     deployment = {
         "schema": "szl.bench-suite.deployment/v1",
         "generated_at": generated_at,
-        "target": "betterwithage/szl-bench-suite",
+        "target": "SZLHOLDINGS/szl-bench-suite",
         "publisher": "szl-holdings/frontier-bench",
         "sources": source_rows,
         "truth": {

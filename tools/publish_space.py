@@ -21,10 +21,10 @@ from typing import Any, Sequence
 ROOT = Path(__file__).resolve().parents[1]
 CONTROLLER_DIR = ROOT / "deploy" / "bench-plane"
 CONTROLLER_PATH = CONTROLLER_DIR / "finish_bench_plane.py"
-TARGET = "betterwithage/szl-bench-suite"
+TARGET = "SZLHOLDINGS/szl-bench-suite"
 EXPECTED_USER = "betterwithage"
 BUNDLE_FILES = {"README.md", "index.html", "results.json"}
-ALLOWED_LIVE_HOSTS = {"betterwithage-szl-bench-suite.hf.space", "betterwithage-szl-bench-suite.static.hf.space"}
+ALLOWED_LIVE_HOSTS = {"szlholdings-szl-bench-suite.hf.space", "szlholdings-szl-bench-suite.static.hf.space"}
 
 
 def _live_url(info: Any) -> str:

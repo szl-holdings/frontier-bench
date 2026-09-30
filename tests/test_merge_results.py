@@ -57,7 +57,7 @@ class MergeResultsTests(unittest.TestCase):
         self.assertEqual(3, results["count"])
         self.assertEqual(["engine", "retrieval", "quant"], [r["plane"] for r in results["results"]])
         self.assertEqual(3, len(results["sources"]))
-        self.assertEqual("betterwithage/szl-bench-suite", deployment["target"])
+        self.assertEqual("SZLHOLDINGS/szl-bench-suite", deployment["target"])
         self.assertTrue(deployment["truth"]["results_are_measured_only"])
         for row in results["results"]:
             self.assertRegex(row["source_revision"], r"^[0-9a-f]{40}$")

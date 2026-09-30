@@ -53,7 +53,7 @@ function validatePublication(results, deployment) {
   if (results.count !== results.results.length || !Array.isArray(results.sources) || results.sources.length !== 3) {
     throw new Error("results proof set is incomplete");
   }
-  if (deployment?.schema !== "szl.bench-suite.deployment/v1" || deployment.target !== "betterwithage/szl-bench-suite") {
+  if (deployment?.schema !== "szl.bench-suite.deployment/v1" || deployment.target !== "SZLHOLDINGS/szl-bench-suite") {
     throw new Error("deployment schema mismatch");
   }
   if (deployment.publisher !== "szl-holdings/frontier-bench" || deployment.truth?.receipt_rows !== results.results.length) {

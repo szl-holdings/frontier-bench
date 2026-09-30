@@ -314,3 +314,18 @@ benchmark program itself is not complete and must not be represented as measured
 | 60 | Local cutover or remote publication rollback failed/incomplete |
 | 70 | Unexpected internal failure with durable report |
 | 130 | Operator interruption |
+
+## Canonical organization publication (2026-09-29)
+
+The current publisher targets `SZLHOLDINGS/szl-bench-suite`. GitHub
+`szl-holdings/frontier-bench` is the source of truth; `.github/workflows/bench.yml`
+is its sole committed writer. The workflow lock is
+`hf-write/space/SZLHOLDINGS/szl-bench-suite`. The previous personal Space
+`betterwithage/szl-bench-suite` remains a historical compatibility surface;
+this controller no longer writes it. Historical observations above are preserved.
+
+The allowed publisher account remains `betterwithage`, an organization member.
+That account check authenticates the writer; the repository and host allowlists
+bind publication to SZLHOLDINGS. `HF_TOKEN` must permit writes to that target.
+A namespace migration does not manufacture benchmark runs: receipt validation,
+compare-and-swap commits, byte readback, and `EMPTY_HONEST` remain enforced.

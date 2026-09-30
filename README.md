@@ -17,7 +17,7 @@ The honest companion to every engine claim. If the estate says the engine is fas
 
 ## Public surface
 
-The consolidated public bench lives at [betterwithage/szl-bench-suite](https://huggingface.co/spaces/betterwithage/szl-bench-suite) (Engine Bench tab) — one evidence surface for engine, retrieval, and quantization claims.
+The consolidated public bench lives at [SZLHOLDINGS/szl-bench-suite](https://huggingface.co/spaces/SZLHOLDINGS/szl-bench-suite) (Engine Bench tab) — one evidence surface for engine, retrieval, and quantization claims.
 
 Hardware identity is declared by receipts and checked against the dedicated-node policy.
 The receipt HMAC authenticates an operator assertion; no independent hardware witness is claimed.
