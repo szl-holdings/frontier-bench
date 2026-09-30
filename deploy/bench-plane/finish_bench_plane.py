@@ -62,8 +62,8 @@ from typing import Any, Iterable, Mapping, Sequence
 
 VERSION = "2.0.0"
 MANAGED_BY = "finish-bench-plane-v2"
-SPACE_ID = "betterwithage/szl-bench-suite"
-SPACE_URL = "https://betterwithage-szl-bench-suite.static.hf.space"
+SPACE_ID = "SZLHOLDINGS/szl-bench-suite"
+SPACE_URL = "https://szlholdings-szl-bench-suite.static.hf.space"
 RUNTIME_BASE_IMAGE = "python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea"
 MAX_JSON_BYTES = 1_048_576
 MAX_HTTP_BYTES = 4_194_304

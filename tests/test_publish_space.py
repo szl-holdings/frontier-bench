@@ -441,11 +441,12 @@ class AnonymousWitnessTests(unittest.TestCase):
             self.assertEqual(publisher._live_url(SimpleNamespace(host=f"https://{host}")), f"https://{host}/")
 
     def test_provider_host_rejects_userinfo_ports_and_other_components(self) -> None:
-        for host in ("http://betterwithage-szl-bench-suite.static.hf.space", "https://example.com",
-                     "https://betterwithage-szl-bench-suite.static.hf.space/other",
-                     "https://betterwithage-szl-bench-suite.static.hf.space?redirect=1",
-                     "https://user@betterwithage-szl-bench-suite.static.hf.space",
-                     "https://betterwithage-szl-bench-suite.static.hf.space:443"):
+        for host in ("https://betterwithage-szl-bench-suite.static.hf.space",
+                     "http://szlholdings-szl-bench-suite.static.hf.space", "https://example.com",
+                     "https://szlholdings-szl-bench-suite.static.hf.space/other",
+                     "https://szlholdings-szl-bench-suite.static.hf.space?redirect=1",
+                     "https://user@szlholdings-szl-bench-suite.static.hf.space",
+                     "https://szlholdings-szl-bench-suite.static.hf.space:443"):
             with self.subTest(host=host), self.assertRaises(ValueError):
                 publisher._live_url(SimpleNamespace(host=host))
 
