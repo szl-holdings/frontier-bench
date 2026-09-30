@@ -2,6 +2,7 @@
 every function here operates only on values actually measured by client.py.
 """
 import statistics
+import math
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -47,16 +48,37 @@ def _pctl(values, q):
 
 
 def summarize(engine: str, model: str, samples: List[RunSample]) -> EngineSummary:
+    for sample in samples:
+        if type(sample.ok) is not bool:
+            raise ValueError("invalid sample success flag")
+        for value in (sample.ttft_s, sample.total_s):
+            if value is not None:
+                try:
+                    valid = (type(value) in (int, float) and value >= 0
+                             and math.isfinite(value) and math.isfinite(value * 1000))
+                except OverflowError:
+                    valid = False
+                if not valid:
+                    raise ValueError("invalid sample timing")
+        if sample.completion_tokens is not None and (
+            type(sample.completion_tokens) is not int or sample.completion_tokens < 0
+        ):
+            raise ValueError("invalid sample token count")
     ok_samples = [s for s in samples if s.ok]
     failed = [s for s in samples if not s.ok]
 
     ttfts = [s.ttft_s * 1000 for s in ok_samples if s.ttft_s is not None]
     totals = [s.total_s * 1000 for s in ok_samples if s.total_s is not None]
-    throughputs = [
-        s.completion_tokens / s.total_s
-        for s in ok_samples
-        if s.completion_tokens and s.total_s and s.total_s > 0
-    ]
+    throughputs = []
+    for sample in ok_samples:
+        if sample.completion_tokens is not None and sample.total_s and sample.total_s > 0:
+            try:
+                value = sample.completion_tokens / sample.total_s
+            except OverflowError:
+                raise ValueError("invalid sample throughput") from None
+            if not math.isfinite(value):
+                raise ValueError("invalid sample throughput")
+            throughputs.append(value)
 
     return EngineSummary(
         engine=engine,

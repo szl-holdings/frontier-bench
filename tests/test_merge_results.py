@@ -1,7 +1,10 @@
 import json
+import hashlib
 import importlib.util
 import tempfile
+import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -29,7 +32,7 @@ class MergeResultsTests(unittest.TestCase):
                         "results": [
                             {
                                 "plane": plane,
-                                "machine": {"gpu": "test"},
+                                "machine": {"cpu": "test", "gpu": "test", "ram_gb": 1},
                                 "measured_at": f"2026-09-04T00:00:0{index}Z",
                                 "method": "test",
                                 "metrics": {"value": index},
@@ -58,9 +61,77 @@ class MergeResultsTests(unittest.TestCase):
         self.assertEqual(["engine", "retrieval", "quant"], [r["plane"] for r in results["results"]])
         self.assertEqual(3, len(results["sources"]))
         self.assertEqual("SZLHOLDINGS/szl-bench-suite", deployment["target"])
-        self.assertTrue(deployment["truth"]["results_are_measured_only"])
+        self.assertFalse(deployment["truth"]["results_are_measured_only"])
+        self.assertEqual("UNVERIFIED", results["evidence_state"])
         for row in results["results"]:
             self.assertRegex(row["source_revision"], r"^[0-9a-f]{40}$")
+            self.assertEqual("UNVERIFIED", row["status"])
+
+    def test_forged_admission_metadata_does_not_authenticate_rows(self):
+        payload = json.loads(self.inputs["engine"].read_text())
+        payload["truth"] = {"results_are_measured_only": True, "authenticated": True}
+        payload["results"][0].update(status="MEASURED", authenticated=True, receipt_admission="VERIFIED")
+        self.inputs["engine"].write_text(json.dumps(payload))
+        results, deployment = build_payloads(self.inputs, self.sources)
+        self.assertEqual("UNVERIFIED", results["results"][0]["status"])
+        self.assertNotIn("authenticated", results["results"][0])
+        self.assertEqual("NOT_CHECKED", deployment["truth"]["receipt_admission"])
+        self.assertFalse(deployment["truth"]["results_are_measured_only"])
+
+    def test_inputs_are_read_once_for_timestamp_rows_and_digest(self):
+        read_bytes = Path.read_bytes
+        reads = []
+        def tracked_read(path):
+            reads.append(path)
+            if reads.count(path) > 1:
+                raise AssertionError("input was reopened")
+            return read_bytes(path)
+        with mock.patch.object(Path, "read_bytes", tracked_read):
+            results, _ = build_payloads(self.inputs, self.sources)
+        self.assertEqual(3, len(reads))
+        for source in results["sources"]:
+            self.assertEqual(hashlib.sha256(read_bytes(self.inputs[source["plane"]])).hexdigest(),
+                             source["input_results_sha256"])
+
+    def test_cli_reads_each_input_once_and_keeps_unverified_status(self):
+        output, deployment_output = self.root / "combined.json", self.root / "deployment.json"
+        argv = ["merge_results.py", "--output", str(output), "--deployment-output", str(deployment_output)]
+        for plane in MODULE.EXPECTED_PLANES:
+            argv.extend(["--input", f"{plane}={self.inputs[plane]}", "--source", f"{plane}={self.sources[plane]}"])
+        load = MODULE._load_payload
+        with mock.patch.object(sys, "argv", argv), mock.patch.object(MODULE, "_load_payload", wraps=load) as reader:
+            self.assertEqual(0, MODULE.main())
+            self.assertEqual(3, reader.call_count)
+        self.assertEqual("UNVERIFIED", json.loads(output.read_text())["evidence_state"])
+        self.assertFalse(json.loads(deployment_output.read_text())["truth"]["results_are_measured_only"])
+
+        self.inputs["engine"].write_text('{"results": [], "count": 0, "generated_at": "invalid"}')
+        output.write_bytes(b"historic result")
+        deployment_output.write_bytes(b"historic deployment")
+        with mock.patch.object(sys, "argv", argv):
+            self.assertEqual(2, MODULE.main())
+        self.assertEqual(b"historic result", output.read_bytes())
+        self.assertEqual(b"historic deployment", deployment_output.read_bytes())
+
+    def test_rejects_invalid_input_values(self):
+        path = self.inputs["engine"]
+        baseline = path.read_text()
+        for field, value in (("count", True), ("generated_at", "yesterday")):
+            with self.subTest(field=field):
+                payload = json.loads(baseline)
+                payload[field] = value
+                path.write_text(json.dumps(payload))
+                with self.assertRaises(ValueError):
+                    build_payloads(self.inputs, self.sources)
+        for field, value in (("metrics", {"value": float("nan")}), ("metrics", {"value": True}),
+                             ("machine", {"cpu": "test", "gpu": "none", "ram_gb": -1}),
+                             ("measured_at", "2026-09-04T00:00:00"), ("method", [])):
+            with self.subTest(field=field, value=value):
+                payload = json.loads(baseline)
+                payload["results"][0][field] = value
+                path.write_text(json.dumps(payload))
+                with self.assertRaises(ValueError):
+                    build_payloads(self.inputs, self.sources)
 
     def test_rejects_cross_plane_rows(self) -> None:
         payload = json.loads(self.inputs["retrieval"].read_text(encoding="utf-8"))

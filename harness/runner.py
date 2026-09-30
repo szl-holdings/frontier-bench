@@ -26,6 +26,10 @@ def load_prompts(path: str):
 
 
 def run_engine(engine_key, spec, prompts, model, repeats, max_tokens):
+    if (type(repeats) is not int or repeats <= 0
+            or not isinstance(prompts, (list, tuple)) or not prompts
+            or not all(isinstance(prompt, str) and prompt.strip() for prompt in prompts)):
+        return {"engine": engine_key, "status": "INVALID", "reason": "invalid request plan"}
     endpoint = spec.resolve_endpoint()
     if not health_check(endpoint):
         return {
@@ -47,8 +51,12 @@ def run_engine(engine_key, spec, prompts, model, repeats, max_tokens):
                     error=result.error,
                 )
             )
-    summary = summarize(engine_key, model, samples)
-    return {"engine": engine_key, "status": "MEASURED", "summary": summary.to_dict()}
+    try:
+        summary = summarize(engine_key, model, samples)
+    except ValueError:
+        return {"engine": engine_key, "status": "INVALID", "reason": "invalid sample values"}
+    status = "MEASURED" if summary.n_success > 0 and summary.p50_total_ms is not None else "FAILED"
+    return {"engine": engine_key, "status": status, "summary": summary.to_dict()}
 
 
 def main():
