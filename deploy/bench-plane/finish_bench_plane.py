@@ -94,7 +94,7 @@ HF_STATIC_CREATOR_USER_ID = "69ec7d565e5561c3b16baba8"
 MAX_HF_STATIC_INDEX_INJECTION_BYTES = 512
 # Updated deliberately whenever either reviewed publication asset changes.
 SPACE_README_SHA256 = "c3d6f9c45e81db69dacd79dab23c0fa2b67abea0a0d22b23f051c4ca0ab347e9"
-SPACE_INDEX_TEMPLATE_SHA256 = "5ba6662bdb8a248189313199cd0c445ef264d4519202275a9bbc6d78507b57fe"
+SPACE_INDEX_TEMPLATE_SHA256 = "11b5448619769a934fb0083307c835fdb406fd5c9f8e80db72c99905d246934a"
 # SZL KANCHAY v1.1.0 (founder direction) files served beside index.html. They
 # are byte-for-byte copies of the szl-holdings/szl-brand kanchay/ vendor bundle
 # at aa876fa (digests from its SOURCE.json), vendored under

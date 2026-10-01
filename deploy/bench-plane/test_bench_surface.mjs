@@ -17,6 +17,13 @@ assert.ok(script, 'expected exactly one inline script');
 assert.equal((html.match(/<script>/g) || []).length, 1);
 new vm.Script(script, {filename: htmlPath});
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+// Static cascade regression only; actual keyboard/forced-color rendering needs a browser.
+const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1];
+const selectedFocus = style?.match(/nav\[aria-label="Bench planes"\] \.btn\[aria-pressed="true"\]:focus-visible\s*\{([^}]*)\}/)?.[1];
+assert.ok(selectedFocus, 'selected plane needs a focus-visible rule stronger than its selected shadow');
+assert.match(selectedFocus, /outline:\s*var\(--border-focus\) solid var\(--focus\)/, 'selected keyboard focus has an opaque outline');
+assert.match(selectedFocus, /box-shadow:\s*inset[^;]+var\(--shadow-focus\)/, 'selection and keyboard focus shadows coexist');
+assert.match(style, /@media\s*\(forced-colors:\s*active\)[\s\S]*?\[aria-pressed="true"\]:focus-visible\s*\{[^}]*outline-color:\s*Highlight/, 'forced-color focus differs from persistent selection');
 for (const tag of ['style', 'script']) {
   const content = html.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`))?.[1];
   assert.ok(content, `${tag} block exists`);
