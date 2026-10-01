@@ -1,8 +1,8 @@
 """Sync verified receipts into site/results.json for the public bench surface.
 
 Fail-closed: any verification error aborts with exit 1 and writes nothing.
-Only MEASURED receipts are exported. Output is UNSIGNED-honest: integrity via
-the hash chain, not signer identity.
+Only receipts declaring MEASURED are exported, explicitly UNVERIFIED. A
+self-hash chain is an integrity check, not evidence of authentic measurement.
 
 usage: sync_results.py [receipts_dir] [out_path] [expected_plane]
 """
@@ -10,9 +10,27 @@ import glob
 import json
 import os
 import sys
+import tempfile
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "verify"))
-from verifier import verify  # noqa: E402
+from verifier import verify_snapshots, utc_timestamp  # noqa: E402
+
+
+def _write_atomic(out, payload):
+    path = Path(out)
+    text = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def main(receipts_dir="receipts", out="site/results.json", expected_plane=None):
@@ -21,16 +39,14 @@ def main(receipts_dir="receipts", out="site/results.json", expected_plane=None):
         print(f"FAIL receipt chain is missing: {receipts_dir}")
         print("aborting: nothing published")
         return 1
-    errors, measured = verify(paths)
+    errors, snapshots = verify_snapshots(paths)
     if errors:
         for e in errors:
             print("FAIL", e)
         print("aborting: nothing published")
         return 1
     receipts = []
-    for p in paths:
-        with open(p, encoding="utf-8") as f:
-            receipt = json.load(f)
+    for p, receipt in snapshots:
         receipts.append(receipt)
         if expected_plane:
             if receipt.get("plane") != expected_plane:
@@ -46,10 +62,12 @@ def main(receipts_dir="receipts", out="site/results.json", expected_plane=None):
         print("aborting: nothing published")
         return 1
     rows = []
-    for p in measured:
-        with open(p, encoding="utf-8") as f:
-            r = json.load(f)
+    for _, r in snapshots:
+        if r["status"] != "MEASURED":
+            continue
         rows.append({
+            "status": "UNVERIFIED",
+            "declared_status": "MEASURED",
             "plane": r["plane"],
             "machine": r["machine"],
             "measured_at": r["measured_at"],
@@ -57,15 +75,22 @@ def main(receipts_dir="receipts", out="site/results.json", expected_plane=None):
             "metrics": r["metrics"],
             "receipt": r["hash"],
         })
-    os.makedirs(os.path.dirname(out), exist_ok=True)
     payload = {
-        "generated_at": max(timestamps),
+        "generated_at": max(timestamps, key=utc_timestamp),
         "count": len(rows),
         "results": rows,
+        "provenance": {
+            "chain_integrity": "SELF_HASH_CONSISTENT",
+            "authenticity": "UNVERIFIED",
+            "results_are_measured_only": False,
+        },
     }
-    with open(out, "w", encoding="utf-8", newline="\n") as f:
-        json.dump(payload, f, indent=2, sort_keys=True)
-    print(f"published {len(rows)} measured rows -> {out}")
+    try:
+        _write_atomic(out, payload)
+    except (OSError, ValueError):
+        print("FAIL output write failed; nothing replaced")
+        return 1
+    print(f"exported {len(rows)} unauthenticated assertion rows -> {out}")
     return 0
 
 
