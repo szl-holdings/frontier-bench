@@ -12,9 +12,9 @@ const htmlPath = fileURLToPath(new URL('./szl-bench-suite.index.html', import.me
 const htmlBytes = readFileSync(htmlPath);
 // HTML parsing normalizes CRLF/CR before CSP hashes are compared with inline text.
 const html = htmlBytes.toString('utf8').replace(/\r\n?/g, '\n');
-const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+const script = html.match(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/i)?.[1];
 assert.ok(script, 'expected exactly one inline script');
-assert.equal((html.match(/<script>/g) || []).length, 1);
+assert.equal((html.match(/<script\b/gi) || []).length, 1);
 new vm.Script(script, {filename: htmlPath});
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 // Static cascade regression only; actual keyboard/forced-color rendering needs a browser.
