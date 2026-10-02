@@ -19,6 +19,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import types
 import unittest
 from unittest import mock
@@ -384,7 +385,89 @@ class ControlTests(unittest.TestCase):
         self.assertTrue(result.output.replace("\r\n", "\n").endswith("last-line\n"))
         with self.assertRaises(bench.BenchError) as captured:
             runner.run([sys.executable, "-I", "-B", "-c", "import sys;print('failure-detail');sys.exit(3)"])
-        self.assertIn("failure-detail", captured.exception.detail["output_tail"])
+        self.assertEqual(captured.exception.detail, {"retained_output_bytes": len(b"failure-detail\n") + (os.name == "nt")})
+
+    def test_command_diagnostics_never_emit_arguments_or_child_content(self) -> None:
+        # Deliberately diverse synthetic inputs: no real secret is read or used.
+        secrets = (
+            "https://user:synthetic-url-password@example.invalid/repo",
+            '{"password": "synthetic json credential with spaces"}',
+            "password='synthetic quoted credential suffix'",
+            "receipt_key_hex=" + "a1" * 32,
+            "synthetic-control\n\r\x1b[31m-injection",
+        )
+        payload = ("\n".join(secrets) + "\n" + "x" * 65_000).encode()
+        command = [sys.executable, *secrets]
+        for method in ("run", "run_bytes"):
+            for quiet in (False, True):
+                for returncode in (0, 3):
+                    with self.subTest(method=method, quiet=quiet, returncode=returncode):
+                        runner = bench.CommandRunner(quiet=quiet)
+                        output = io.StringIO()
+                        options = {} if method == "run" else {
+                            "timeout": 1, "max_bytes": 100_000, "phase": "fixture", "exit_code": bench.EXIT_INTERNAL,
+                        }
+                        with mock.patch.object(runner, "_capture", return_value=(returncode, payload, payload, 0.125, False)):
+                            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                                if returncode:
+                                    with self.assertRaises(bench.BenchError) as captured:
+                                        getattr(runner, method)(command, **options)
+                                    diagnostic = str(captured.exception) + json.dumps(captured.exception.detail)
+                                else:
+                                    result = getattr(runner, method)(command, **options)
+                                    self.assertEqual(result.output if method == "run" else result,
+                                                     bench.redact(payload.decode()) if method == "run" else payload)
+                                    diagnostic = ""
+                        diagnostic += output.getvalue()
+                        for secret in secrets:
+                            self.assertNotIn(secret, diagnostic)
+                        self.assertNotIn("x" * 100, diagnostic)
+                        self.assertLess(len(diagnostic), 500)
+                        if quiet:
+                            self.assertEqual(output.getvalue(), "")
+                        else:
+                            self.assertIn("arguments=5", output.getvalue())
+                            self.assertIn(f"exit={returncode}", output.getvalue())
+
+    def test_command_error_diagnostics_suppress_sensitive_exception_context(self) -> None:
+        secret = "synthetic-command-and-oserror-secret"
+        command = [sys.executable, secret]
+        for method in ("run", "run_bytes"):
+            for quiet in (False, True):
+                for failure in (subprocess.TimeoutExpired(command, 1), OSError(secret)):
+                    with self.subTest(method=method, quiet=quiet, failure=type(failure).__name__):
+                        runner = bench.CommandRunner(quiet=quiet)
+                        output = io.StringIO()
+                        options = {} if method == "run" else {
+                            "timeout": 1, "max_bytes": 1024, "phase": "fixture", "exit_code": bench.EXIT_INTERNAL,
+                        }
+                        with mock.patch.object(runner, "_capture", side_effect=failure):
+                            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                                with self.assertRaises(bench.BenchError) as captured:
+                                    getattr(runner, method)(command, **options)
+                        formatted = "".join(traceback.format_exception(captured.exception))
+                        self.assertNotIn(secret, formatted + output.getvalue())
+                        self.assertTrue(captured.exception.__suppress_context__)
+                        self.assertIsNone(captured.exception.__cause__)
+
+    def test_command_overflow_and_invalid_executable_diagnostics_are_content_free(self) -> None:
+        secret = "synthetic-invalid-path-and-output-secret"
+        for quiet in (False, True):
+            runner = bench.CommandRunner(quiet=quiet)
+            for method in ("run", "run_bytes"):
+                options = {} if method == "run" else {
+                    "timeout": 1, "max_bytes": 1024, "phase": "fixture", "exit_code": bench.EXIT_INTERNAL,
+                }
+                with self.subTest(method=method, quiet=quiet), self.assertRaises(bench.BenchError) as captured:
+                    getattr(runner, method)([secret], **options)
+                self.assertNotIn(secret, str(captured.exception))
+            output = io.StringIO()
+            with mock.patch.object(runner, "_capture", return_value=(0, secret.encode(), secret.encode(), 0.125, True)):
+                with contextlib.redirect_stdout(output), self.assertRaises(bench.BenchError) as captured:
+                    runner.run_bytes([sys.executable, secret], timeout=1, max_bytes=1,
+                                     phase="fixture", exit_code=bench.EXIT_INTERNAL)
+            self.assertIn("exceeds 1 bytes", str(captured.exception))
+            self.assertNotIn(secret, str(captured.exception) + output.getvalue())
 
     def test_command_runner_timeout_terminates_child(self) -> None:
         original_popen = subprocess.Popen
