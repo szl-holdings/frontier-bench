@@ -839,10 +839,13 @@ class CommandRunner:
         env_extra: Mapping[str, str] | None = None,
     ) -> CommandResult:
         if not command or not pathlib.Path(str(command[0])).is_absolute():
-            raise BenchError(phase, f"bare executable name is forbidden: {command[0] if command else '<empty>'}", exit_code)
-        shown = " ".join(str(part) for part in command)
+            raise BenchError(phase, "command requires an absolute executable path", exit_code)
+        # Arguments, paths and child output can contain arbitrary credentials.
+        # Pattern redaction is not a diagnostic confidentiality boundary. Keep
+        # protocol output for callers, but emit only non-content metadata.
+        shown = f"command (arguments={len(command) - 1})"
         if not self.quiet:
-            print("+", redact(shown), flush=True)
+            print("+", shown, flush=True)
         try:
             returncode, stdout, _, elapsed, _ = self._capture(
                 command,
@@ -852,19 +855,19 @@ class CommandRunner:
                 merge_stderr=True,
                 stdout_limit=None,
             )
-        except subprocess.TimeoutExpired as exc:
-            raise BenchError(phase, f"command timed out after {timeout:.0f}s: {shown}", exit_code) from exc
-        except OSError as exc:
-            raise BenchError(phase, f"could not start command: {shown}: {exc}", exit_code) from exc
+        except subprocess.TimeoutExpired:
+            raise BenchError(phase, f"command timed out after {timeout:.0f}s: {shown}", exit_code) from None
+        except OSError:
+            raise BenchError(phase, f"could not complete command: {shown}", exit_code) from None
         retained = redact(stdout.decode("utf-8", errors="replace"))
-        if retained and not self.quiet:
-            print(retained, end="" if retained.endswith("\n") else "\n", flush=True)
+        if not self.quiet:
+            print(f"command complete exit={returncode} elapsed={elapsed:.3f}s retained_output_bytes={len(stdout)}", flush=True)
         if check and returncode != 0:
             raise BenchError(
                 phase,
                 f"command failed ({returncode}): {shown}",
                 exit_code,
-                detail={"output_tail": retained[-8_192:]},
+                detail={"retained_output_bytes": len(stdout)},
             )
         return CommandResult(returncode, retained, elapsed)
 
@@ -879,12 +882,12 @@ class CommandRunner:
         env_extra: Mapping[str, str] | None = None,
     ) -> bytes:
         if not command or not pathlib.Path(str(command[0])).is_absolute():
-            raise BenchError(phase, f"bare executable name is forbidden: {command[0] if command else '<empty>'}", exit_code)
-        shown = " ".join(str(part) for part in command)
+            raise BenchError(phase, "command requires an absolute executable path", exit_code)
+        shown = f"command (arguments={len(command) - 1})"
         if not self.quiet:
-            print("+", redact(shown), flush=True)
+            print("+", shown, flush=True)
         try:
-            returncode, stdout, stderr, _, overflow = self._capture(
+            returncode, stdout, stderr, elapsed, overflow = self._capture(
                 command,
                 cwd=None,
                 timeout=timeout,
@@ -892,15 +895,17 @@ class CommandRunner:
                 merge_stderr=False,
                 stdout_limit=max_bytes,
             )
-        except subprocess.TimeoutExpired as exc:
-            raise BenchError(phase, f"command timed out after {timeout:.0f}s: {shown}", exit_code) from exc
-        except OSError as exc:
-            raise BenchError(phase, f"could not start command: {shown}: {exc}", exit_code) from exc
+        except subprocess.TimeoutExpired:
+            raise BenchError(phase, f"command timed out after {timeout:.0f}s: {shown}", exit_code) from None
+        except OSError:
+            raise BenchError(phase, f"could not complete command: {shown}", exit_code) from None
+        if not self.quiet:
+            print(f"command complete exit={returncode} elapsed={elapsed:.3f}s retained_stdout_bytes={len(stdout)} retained_stderr_bytes={len(stderr)}", flush=True)
         if overflow:
             raise BenchError(phase, f"command output exceeds {max_bytes} bytes: {shown}", exit_code)
         if returncode != 0:
-            error = redact(stderr.decode("utf-8", errors="replace")[-8_192:])
-            raise BenchError(phase, f"command failed ({returncode}): {shown}", exit_code, detail={"stderr_tail": error})
+            raise BenchError(phase, f"command failed ({returncode}): {shown}", exit_code,
+                             detail={"retained_stdout_bytes": len(stdout), "retained_stderr_bytes": len(stderr)})
         return stdout
 
 
