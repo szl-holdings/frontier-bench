@@ -216,6 +216,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--bundle-dir", type=Path, required=True, help="directory exported by the reviewed controller audit")
     parser.add_argument("--git-bin", help="optional absolute trusted Git executable path")
     parser.add_argument("--report", type=Path, help="new local JSON report path; defaults to .bench-plane-publish/<run-id>.json")
+    parser.add_argument("--verify-only", action="store_true", help="verify the existing public bundle anonymously; never resolve write credentials or modify the Space")
     parser.add_argument("--use-cached-auth", "--cached-auth", dest="use_cached_auth", action="store_true", help="explicitly permit reading the local Hugging Face login token in this process")
     parser.add_argument("--provider-timeout", type=positive_timeout, default=600.0)
     parser.add_argument("--public-http-deadline", type=positive_timeout, default=180.0)
@@ -226,6 +227,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     report: dict[str, Any] = {
         "schema_version": "szl-static-bench-publication/v1", "run_id": run_id,
         "started_at": controller.utc_now(), "target": TARGET, "space_url": f"{controller.SPACE_URL}/index.html",
+        "mode": "VERIFY_ONLY" if args.verify_only else "PUBLISH",
         "controller_sha256": controller.sha256_file(CONTROLLER_PATH),
         "state": "IN_PROGRESS", "remote_mutation": "NOT_ATTEMPTED",
         "measurements": "NOT_PERFORMED_BY_PUBLISHER", "local_runtime": "NOT_REQUESTED",
@@ -253,13 +255,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             report["admission"] = admission
             report["data_state"], report["count"] = payload["data_state"], payload["count"]
             controller.atomic_write(report_path, controller.pretty_json_bytes(report))
-            previous_token = os.environ.get("HF_TOKEN")
             added_cached_token = False
             try:
                 # Even when credentials are available, unchanged healthy data
                 # must be witnessed anonymously before resolving write authority.
                 outcome = verify_anonymous_noop(controller, files, run_root)
                 if outcome is None:
+                    if args.verify_only:
+                        raise controller.BenchError("verification_only", "the existing public bundle or runtime could not be verified; read-only mode cannot publish or repair it", controller.EXIT_PROVIDER)
+                    previous_token = os.environ.get("HF_TOKEN")
                     if not previous_token and args.use_cached_auth:
                         from huggingface_hub import get_token
                         cached_token = get_token()

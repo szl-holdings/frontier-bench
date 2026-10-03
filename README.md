@@ -30,7 +30,20 @@ The canonical publisher repeats receipt admission before committing and verifies
 files, provider state, and exact public bytes. See the [operations guide](deploy/bench-plane/BENCH_PLANE_OPERATIONS.md).
 An unchanged healthy public bundle is verified without a provider credential; any
 content or runtime write fails closed unless the owner credential is available.
-Scheduled publication stays disabled until a scoped repository credential is installed.
+The canonical workflow publishes on main pushes, Mondays at 06:17 UTC, and manual
+main dispatches, under one Space-scoped writer lock. Writes require the scoped
+`HF_TOKEN` Actions secret; pull requests never publish.
+
+For an explicitly read-only deployment check, first export the reviewed bundle as
+described in the operations guide, then run:
+
+```bash
+python -I -B tools/publish_space.py --bundle-dir /path/to/audit/bundle --verify-only
+```
+
+This re-admits the source receipts and checks immutable and public bytes without
+using publishing credentials or changing the Space. Any content/runtime drift
+fails closed and must be handled by the canonical publisher.
 
 ## Status
 

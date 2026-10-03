@@ -71,7 +71,7 @@ cannot disable them.
 - Local audit reports are generated under the selected work directory; workstation
   paths and machine inventories are not committed to this package.
 
-## Validated here
+## Historical validation (2026-09-05)
 
 The local audit path inspects reviewed immutable revisions reachable from fetched main
 and records fetched main separately. Reviewed test-file manifests are checked without executing them. All
@@ -207,9 +207,35 @@ no Docker or Hugging Face changes.
 again, compares the exact exported bytes, and performs the provider commit/readback.
 `--use-cached-auth` (also `--cached-auth`) explicitly uses an existing local login for a
 direct operator release. Identical, healthy public content can be verified anonymously;
-content and runtime writes require the owner credential. Scheduled publication is disabled
-until a scoped `HF_TOKEN` Actions secret is installed. Manual workflow dispatch remains
-available. The cached personal credential is not copied into CI.
+content and runtime writes require the owner credential. The canonical workflow runs on
+main pushes, Mondays at 06:17 UTC, and manual main dispatches. Writes require a scoped
+`HF_TOKEN` Actions secret. Pull-request runs never publish. The cached personal
+credential is not copied into CI.
+
+For verification only, add `--verify-only` to the publisher command. This mode
+re-admits the source receipts, verifies every managed file at an immutable Hub
+revision, and witnesses the public payload and assets between stable runtime/head
+observations. It never resolves environment or cached publishing credentials,
+commits, or restarts the Space, even if `--use-cached-auth` is also supplied. A changed
+bundle or unhealthy runtime fails with exit 53 rather than falling back to a write.
+The JSON report records `mode: VERIFY_ONLY`; verification is not a new publication.
+
+From the `frontier-bench` repository root, after installing the pinned Hub client:
+
+```bash
+python -I -B deploy/bench-plane/finish_bench_plane.py \
+  --audit-only --target local --workdir /path/to/new-audit \
+  --space-readme deploy/bench-plane/szl-bench-suite.README.md \
+  --space-index deploy/bench-plane/szl-bench-suite.index.html \
+  --export-space-bundle /path/to/new-audit/bundle
+python -I -B tools/publish_space.py \
+  --bundle-dir /path/to/new-audit/bundle --verify-only \
+  --report /path/to/new-audit/public-verification.json
+```
+
+Use a new audit directory and report path; prior evidence is never overwritten.
+The audit and read-only public check work on Windows. They do not qualify the
+Windows host for dedicated-node deployment or perform benchmark measurements.
 
 When measured sources are deliberately reviewed and pinned, provision
 `SZL_BENCH_RECEIPT_HMAC_KEY_HEX` as a protected Actions secret for the separately
@@ -245,10 +271,12 @@ manifest with its public key anchored outside Hugging Face. Likewise, HMAC prove
 holder of the shared key made an assertion; it does not prove the benchmark actually ran
 and is not public non-repudiation.
 
-## Current external state and blockers
+## Historical external state (2026-09-05)
 
 This controller does not alter GitHub repositories or manufacture missing measurements.
-The refreshed live inventory on 2026-09-05 is:
+The inventory observed on 2026-09-05 was as follows. It is historical evidence,
+not a current deployment claim; the organization-publication contract below
+supersedes the former personal target and disabled-schedule observations.
 
 | Layer | Current state |
 |---|---|
