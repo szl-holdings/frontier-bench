@@ -67,7 +67,7 @@ class PublisherTests(unittest.TestCase):
 
     def invoke(self, *, token: bool = True, expected: bytes | None = None, extra: list[str] | None = None,
                readmit_error: BaseException | None = None, publish_error: BaseException | None = None,
-               anonymous_outcome: dict | None = None):
+               anonymous_outcome: dict | None = None, anonymous_error: BaseException | None = None):
         output = io.StringIO()
         env = {key: value for key, value in os.environ.items() if key not in {"HF_TOKEN", controller.RECEIPT_KEY_ENV}}
         if token:
@@ -75,7 +75,7 @@ class PublisherTests(unittest.TestCase):
         admission = {"state": "READMITTED_FROM_REVIEWED_SOURCE_RECEIPTS", "count": 0}
         with patch.dict(os.environ, env, clear=True), patch.object(publisher, "load_controller", return_value=controller), \
                 patch.object(publisher, "readmit_payload", return_value=(self.payload if expected is None else expected, admission), side_effect=readmit_error) as readmit, \
-                patch.object(publisher, "verify_anonymous_noop", return_value=anonymous_outcome) as anonymous, \
+                patch.object(publisher, "verify_anonymous_noop", return_value=anonymous_outcome, side_effect=anonymous_error) as anonymous, \
                 patch.object(controller, "hub_preflight", return_value=self.context) as preflight, \
                 patch.object(controller, "publish_and_witness", return_value={"changed": True, "commit": "a" * 40}, side_effect=publish_error) as publish, \
                 contextlib.redirect_stdout(output):
@@ -91,6 +91,7 @@ class PublisherTests(unittest.TestCase):
         code, report, readmit, preflight, publish = self.invoke()
         self.assertEqual(code, 0)
         self.assertEqual(report["state"], "PUBLISHED_EVIDENCE_SURFACE_OPERATIONAL")
+        self.assertEqual(report["mode"], "PUBLISH")
         self.assertEqual(report["space_url"], f"{controller.SPACE_URL}/index.html")
         self.assertEqual(report["measurements"], "NOT_PERFORMED_BY_PUBLISHER")
         readmit.assert_called_once()
@@ -253,6 +254,58 @@ class PublisherTests(unittest.TestCase):
         preflight.assert_called_once()
         publish.assert_called_once()
         self.assertNotIn("hf_CACHED_TEST_ONLY", json.dumps(report))
+
+    def test_verify_only_never_resolves_write_authority_or_falls_back(self) -> None:
+        outcome = {"changed": False, "commit": "a" * 40, "publisher": "ANONYMOUS_READ_ONLY"}
+        provider_error = controller.BenchError("anonymous_witness", "provider witness failed", controller.EXIT_PROVIDER)
+        cases = (("verified", outcome, None), ("different", None, None), ("provider_error", None, provider_error))
+        original_get = os.environ.get
+
+        def without_write_token(key, default=None):
+            self.assertNotEqual(key, "HF_TOKEN", "verification-only must not look up write credentials")
+            return original_get(key, default)
+
+        for token in (False, True):
+            for cached_flag in (False, True):
+                for label, anonymous_outcome, anonymous_error in cases:
+                    with self.subTest(token_present=token, cached_flag=cached_flag, outcome=label):
+                        self.report = self.root / f"verify-{token}-{cached_flag}-{label}.json"
+                        cached = Mock(side_effect=AssertionError("verification-only must not resolve cached credentials"))
+                        extra = ["--verify-only", *(["--use-cached-auth"] if cached_flag else [])]
+                        with patch.dict(sys.modules, {"huggingface_hub": SimpleNamespace(get_token=cached)}), \
+                                patch.object(os.environ, "get", side_effect=without_write_token):
+                            code, report, readmit, preflight, publish = self.invoke(
+                                token=token, extra=extra, anonymous_outcome=anonymous_outcome,
+                                anonymous_error=anonymous_error)
+                        self.assertEqual(report["mode"], "VERIFY_ONLY")
+                        readmit.assert_called_once()
+                        self.anonymous.assert_called_once()
+                        cached.assert_not_called()
+                        preflight.assert_not_called()
+                        publish.assert_not_called()
+                        if label == "verified":
+                            self.assertEqual(code, 0)
+                            self.assertEqual(report["state"], "PUBLISHED_EVIDENCE_SURFACE_OPERATIONAL")
+                            self.assertEqual(report["remote_mutation"], "NO_CHANGE_WITNESSED")
+                            self.assertEqual(report["publication"], outcome)
+                        else:
+                            self.assertEqual(code, controller.EXIT_PROVIDER)
+                            self.assertEqual(report["state"], "FAILED_CLOSED")
+                            self.assertEqual(report["remote_mutation"], "NOT_ATTEMPTED")
+                            self.assertEqual(report["failure"]["phase"],
+                                             "verification_only" if label == "different" else "anonymous_witness")
+                        self.assertEqual(json.loads(self.report.read_bytes())["mode"], "VERIFY_ONLY")
+
+    def test_verify_only_preserves_fresh_source_readmission(self) -> None:
+        code, report, readmit, preflight, publish = self.invoke(extra=["--verify-only"], expected=b"different")
+        self.assertEqual(code, controller.EXIT_RESULT)
+        self.assertEqual(report["mode"], "VERIFY_ONLY")
+        self.assertEqual(report["failure"]["phase"], "bundle_admission")
+        self.assertEqual(report["remote_mutation"], "NOT_ATTEMPTED")
+        readmit.assert_called_once()
+        self.anonymous.assert_not_called()
+        preflight.assert_not_called()
+        publish.assert_not_called()
 
     def test_cached_auth_alias_uses_explicit_cached_path(self) -> None:
         cached = Mock(return_value="hf_CACHED_TEST_ONLY")
