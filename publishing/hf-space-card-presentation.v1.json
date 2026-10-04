@@ -1,0 +1,91 @@
+{
+  "_notice": "SPDX-License-Identifier: Apache-2.0; (c) 2026 SZL Holdings",
+  "schema": "szl.hf.space-card-presentation.v1",
+  "source_repository": "szl-holdings/frontier-bench",
+  "cards": [
+    {
+      "kind": "spaces",
+      "repo_id": "SZLHOLDINGS/szl-bench-suite",
+      "source_repository": "szl-holdings/frontier-bench",
+      "source_revision_before_presentation": "3e1f174fbb2816fc326a063cbacad738a8d745c4",
+      "source_path": "deploy/bench-plane/szl-bench-suite.README.md",
+      "source_url": "https://github.com/szl-holdings/frontier-bench/blob/3e1f174fbb2816fc326a063cbacad738a8d745c4/deploy/bench-plane/szl-bench-suite.README.md",
+      "presentation": {
+        "title": "SZL Bench Suite",
+        "summary": "Inspect admitted engine, retrieval and quantization evidence in one static surface. Each displayed result depends on the existing receipt-admission and publication checks.",
+        "artifact_type": "Receipt-gated benchmark evidence display",
+        "stage": "Static evidence surface; no benchmark execution",
+        "build_url": "https://github.com/szl-holdings/frontier-bench",
+        "evidence_url": "https://github.com/szl-holdings/frontier-bench/actions/workflows/bench.yml",
+        "visible_limits": [
+          "EMPTY_HONEST means zero admitted measured rows. UNAVAILABLE means the result payload could not be fetched or validated.",
+          "The page runs no benchmarks. Demos, fixtures and in-memory harness output are not measurements.",
+          "Controller HMACs authenticate operator assertions. The public page has no shared key or independently verifiable signature."
+        ]
+      },
+      "before_sha256": "c3d6f9c45e81db69dacd79dab23c0fa2b67abea0a0d22b23f051c4ca0ab347e9",
+      "after_sha256": "972b769fe9a0be7056ea3c472e8410c4d351705a224d44a15b758d4d463872f8",
+      "front_matter_sha256": "204715bc291e2317597b8f70229762ed4a5df439de7568cb160949a27bd921f7",
+      "preserved_body_sha256": "48e2dde562c5c9005363b2f2bcaaedc895e6d7d282c45cfa930b27d80eea457d",
+      "bytes_before": 2224,
+      "bytes_after": 3701,
+      "front_matter_preserved": true,
+      "original_body_preserved": true,
+      "reviewed_asset_digest_update": {
+        "source_path": "deploy/bench-plane/finish_bench_plane.py",
+        "constant": "SPACE_README_SHA256",
+        "before": "c3d6f9c45e81db69dacd79dab23c0fa2b67abea0a0d22b23f051c4ca0ab347e9",
+        "after": "972b769fe9a0be7056ea3c472e8410c4d351705a224d44a15b758d4d463872f8",
+        "documented_update_contract": "Updated deliberately whenever either reviewed publication asset changes.",
+        "contract_source_url": "https://github.com/szl-holdings/frontier-bench/blob/3e1f174fbb2816fc326a063cbacad738a8d745c4/deploy/bench-plane/finish_bench_plane.py",
+        "controller_ast_except_this_digest_unchanged": true,
+        "index_digest_and_static_asset_constants_unchanged": true,
+        "protected_assets": [
+          {
+            "source_path": "deploy/bench-plane/szl-bench-suite.index.html",
+            "sha256": "11b5448619769a934fb0083307c835fdb406fd5c9f8e80db72c99905d246934a",
+            "unchanged": true
+          },
+          {
+            "source_path": "deploy/bench-plane/szl/SOURCE.json",
+            "sha256": "5cfe994c4ea5060aec217f250bf049b57f2063bbd2cf74ef67d16b086e1965b3",
+            "unchanged": true
+          },
+          {
+            "source_path": "deploy/bench-plane/szl/szl-design-system.css",
+            "sha256": "9e5e6e3ae2a5c6f5a2a3c6bf4c607406dc39db3fbe9115e91a1865054678493e",
+            "unchanged": true
+          },
+          {
+            "source_path": "deploy/bench-plane/szl/logos/szl_favicon.svg",
+            "sha256": "4b154f0de21f71b111bde98bc564ddeef082d888d44f0b50b5a5247e3badf190",
+            "unchanged": true
+          }
+        ],
+        "unchanged_validators": [
+          {
+            "function": "validate_static_space_readme",
+            "sha256": "15036592979882fd1cd35ce2124a80f62dbe7cc6417f916b9282165ff71e7b24",
+            "implementation_unchanged": true
+          },
+          {
+            "function": "validate_space_index_template",
+            "sha256": "69779eb16f4ecc106a9a3c3bbcd518c78008d2225799fb94cdec51e6596e8b32",
+            "implementation_unchanged": true
+          }
+        ]
+      },
+      "publisher_repository": "szl-holdings/frontier-bench",
+      "publisher_workflow": ".github/workflows/bench.yml",
+      "publisher_workflow_source_url": "https://github.com/szl-holdings/frontier-bench/blob/3e1f174fbb2816fc326a063cbacad738a8d745c4/.github/workflows/bench.yml",
+      "publisher_readme_mapping": "The existing finish_bench_plane.py audit/export validates this exact README digest and packages it as README.md; tools/publish_space.py revalidates the bundle before the existing fixed-target publication.",
+      "publication_trigger": "Existing main push, Monday 06:17 UTC schedule or workflow_dispatch on main; pull requests run verification only. No manual event is dispatched by this preparation.",
+      "publication_state_at_preparation": "SOURCE_CANDIDATE_ONLY_NO_HUB_EVENT_BY_THIS_LANE",
+      "publication_boundary": "The existing trusted-main writer still re-admits pinned receipt sources, requires the unchanged HMAC/chain/workload evidence rules, publishes one parent-constrained exact bundle, and verifies immutable/public readback. The reviewed README digest changes with its reviewed asset; validator implementations, index/static asset digests, source pins, rows, workloads and qualification states do not change.",
+      "writer_or_workflow_changed": true,
+      "publisher_control_flow_changed": false,
+      "runtime_or_artifact_code_changed": false,
+      "central_apply_allowed": false
+    }
+  ]
+}
