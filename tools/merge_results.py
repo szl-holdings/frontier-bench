@@ -153,6 +153,22 @@ def build_payloads(
     return results, deployment
 
 
+def _validate_output_paths(output: Path, deployment_output: Path) -> None:
+    """Reject colliding destinations before either atomic file write starts."""
+    try:
+        result_path = output.resolve()
+        deployment_path = deployment_output.resolve()
+    except RuntimeError as error:
+        raise ValueError("cannot resolve output paths") from error
+    if (result_path == deployment_path
+            or result_path in deployment_path.parents
+            or deployment_path in result_path.parents):
+        raise ValueError("result and deployment outputs must be separate files")
+    if (output.exists() and deployment_output.exists()
+            and output.samefile(deployment_output)):
+        raise ValueError("result and deployment outputs refer to the same file")
+
+
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
@@ -184,6 +200,7 @@ def main() -> int:
             for plane, value in _parse_mapping(args.inputs, "input").items()
         }
         sources = _parse_mapping(args.sources, "source")
+        _validate_output_paths(args.output, args.deployment_output)
         results, deployment = build_payloads(inputs, sources)
         _write_json_atomic(args.output, results)
         _write_json_atomic(args.deployment_output, deployment)

@@ -154,5 +154,51 @@ class MergeResultsTests(unittest.TestCase):
             build_payloads(self.inputs, self.sources, "2026-09-04T00:01:00Z")
 
 
+    def _run_cli(self, output: Path, deployment_output: Path) -> int:
+        argv = ["merge_results.py", "--output", str(output),
+                "--deployment-output", str(deployment_output)]
+        for plane in MODULE.EXPECTED_PLANES:
+            argv.extend(["--input", f"{plane}={self.inputs[plane]}",
+                         "--source", f"{plane}={self.sources[plane]}"])
+        with mock.patch.object(sys, "argv", argv):
+            return MODULE.main()
+
+    def test_cli_rejects_same_output_without_overwriting_existing_bytes(self):
+        output = self.root / "combined.json"
+        output.write_bytes(b"historic result")
+        self.assertEqual(2, self._run_cli(output, output))
+        self.assertEqual(b"historic result", output.read_bytes())
+
+    def test_cli_rejects_normalized_output_alias_before_creating_file(self):
+        directory = self.root / "nested"
+        directory.mkdir()
+        output = self.root / "combined.json"
+        alias = directory / ".." / output.name
+        self.assertEqual(2, self._run_cli(output, alias))
+        self.assertFalse(output.exists())
+
+    def test_cli_rejects_nested_outputs_before_creating_either_path(self):
+        for parent_is_result in (True, False):
+            with self.subTest(parent_is_result=parent_is_result):
+                parent = self.root / f"output-{parent_is_result}"
+                child = parent / "deployment.json"
+                outputs = (parent, child) if parent_is_result else (child, parent)
+                self.assertEqual(2, self._run_cli(*outputs))
+                self.assertFalse(parent.exists())
+
+    def test_cli_rejects_hardlinked_output_files_without_replacing_them(self):
+        output = self.root / "combined.json"
+        deployment_output = self.root / "deployment.json"
+        output.write_bytes(b"historic result")
+        try:
+            deployment_output.hardlink_to(output)
+        except OSError as error:
+            self.skipTest(f"hardlinks unavailable: {error}")
+        self.assertEqual(2, self._run_cli(output, deployment_output))
+        self.assertEqual(b"historic result", output.read_bytes())
+        self.assertEqual(b"historic result", deployment_output.read_bytes())
+        self.assertTrue(output.samefile(deployment_output))
+
+
 if __name__ == "__main__":
     unittest.main()
