@@ -95,15 +95,15 @@ HF_STATIC_CREATOR_USER_ID = "69ec7d565e5561c3b16baba8"
 MAX_HF_STATIC_INDEX_INJECTION_BYTES = 512
 # Updated deliberately whenever either reviewed publication asset changes.
 SPACE_README_SHA256 = "14c41c9e8d7e8568223152f248ff8819e5a59aac7c47f8e97c519b29c17212ee"
-SPACE_INDEX_TEMPLATE_SHA256 = "11b5448619769a934fb0083307c835fdb406fd5c9f8e80db72c99905d246934a"
-# SZL KANCHAY v1.1.0 (founder direction) files served beside index.html. They
+SPACE_INDEX_TEMPLATE_SHA256 = "f9fe538f32f5e39481dcc96bd621cb377c7b4284889bad4cadecf2285af0e181"
+# SZL KANCHAY v1.3.0 (founder direction) files served beside index.html. They
 # are byte-for-byte copies of the szl-holdings/szl-brand kanchay/ vendor bundle
-# at aa876fa (digests from its SOURCE.json), vendored under
+# at source 27d12e77fc0f9f1a0e5fae8b34adf2380d51d070 (digests from its SOURCE.json), vendored under
 # deploy/bench-plane/szl/ and published at the same relative paths. Presentation
 # only: they carry no data or evidence. No webfonts: the system uses font stacks.
 SPACE_STATIC_ASSETS: Mapping[str, str] = {
-    "szl/SOURCE.json": "5cfe994c4ea5060aec217f250bf049b57f2063bbd2cf74ef67d16b086e1965b3",
-    "szl/szl-design-system.css": "9e5e6e3ae2a5c6f5a2a3c6bf4c607406dc39db3fbe9115e91a1865054678493e",
+    "szl/SOURCE.json": "967a77235227f1d75852fb61873e46336e67403cbc0e7e12b141e31c83fbd93d",
+    "szl/szl-design-system.css": "da310be5cbe23dfc4054d1bb07e5b37e1a62a510e43902171e217af5c1ff0ec7",
     "szl/logos/szl_favicon.svg": "4b154f0de21f71b111bde98bc564ddeef082d888d44f0b50b5a5247e3badf190",
 }
 SPACE_CORE_FILES: tuple[str, ...] = ("README.md", "index.html", "results.json")

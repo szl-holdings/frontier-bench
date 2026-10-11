@@ -15,13 +15,13 @@ WEBFONT = re.compile(r"(?i)fonts\.googleapis|fonts\.gstatic|fontshare|@font-face
 
 
 class FounderDesignSystemVendoringTests(unittest.TestCase):
-    """SZL KANCHAY v1.1.0 (founder direction) is vendored byte for byte once per served root."""
+    """SZL KANCHAY v1.3.0 (founder direction) is vendored byte for byte once per served root."""
 
     def test_each_served_root_carries_an_exact_copy_of_the_export(self) -> None:
         for root in SZL_ROOTS:
             with self.subTest(root=root.relative_to(ROOT).as_posix()):
                 manifest = json.loads((root / "SOURCE.json").read_text(encoding="utf-8"))
-                self.assertEqual((manifest["name"], manifest["version"]), ("szl-kanchay", "1.1.0"))
+                self.assertEqual((manifest["name"], manifest["version"]), ("szl-kanchay", "1.3.0"))
                 vendored = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()}
                 self.assertEqual(vendored, SZL_FILES)
                 for name in vendored - {"SOURCE.json"}:

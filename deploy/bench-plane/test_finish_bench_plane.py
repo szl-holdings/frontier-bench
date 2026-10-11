@@ -266,7 +266,7 @@ class ControlTests(unittest.TestCase):
         assets = bench.load_space_static_assets(HERE / "szl-bench-suite.index.html", phase="test", exit_code=1)
         self.assertEqual(list(assets), list(bench.SPACE_STATIC_ASSETS))
         manifest = json.loads(assets["szl/SOURCE.json"])
-        self.assertEqual((manifest["name"], manifest["version"]), ("szl-kanchay", "1.1.0"))
+        self.assertEqual((manifest["name"], manifest["version"]), ("szl-kanchay", "1.3.0"))
         for name, data in assets.items():
             if name != "szl/SOURCE.json":
                 self.assertEqual(manifest["sha256"][name.removeprefix("szl/")], bench.sha256_bytes(data))

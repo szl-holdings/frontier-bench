@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'self'; style-src 'sha256-nOI1bEXNLNSyXGtID7EuwlEDv8yO3QvxpUINDyaSJc4=' 'self'; img-src 'self'; script-src 'sha256-O435pAYsRt2BjLsyYoYBeoRsXQEs2SJf48ipTj9pt+w='; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'self'; style-src 'sha256-9ePbiYxuDM6h449EqXDivfoLMrfdhGRmYQmVq0FE1j8=' 'self'; img-src 'self'; script-src 'sha256-O435pAYsRt2BjLsyYoYBeoRsXQEs2SJf48ipTj9pt+w='; base-uri 'none'; form-action 'none'; object-src 'none'">
   <meta name="szl-results-sha256" content="__RESULTS_JSON_SHA256__">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark">
@@ -10,16 +10,16 @@
   <link rel="icon" type="image/svg+xml" href="szl/logos/szl_favicon.svg">
   <link rel="stylesheet" href="szl/szl-design-system.css">
   <style>
-    /* SZL KANCHAY v1.1.0, dark operator surface: every color and face is a token from szl/szl-design-system.css. */
+    /* SZL KANCHAY v1.3.0, dark operator surface: every color and face is a token from szl/szl-design-system.css. */
     body { min-width: 320px; }
     .nav__brand { min-block-size: var(--target-size-coarse); }
     .nav__link { display: inline-flex; align-items: center; gap: var(--space-2); min-block-size: var(--target-size-coarse); }
-    .wrap { width: min(var(--container), calc(100% - 2 * var(--space-4))); margin: var(--space-10) auto var(--space-12); }
+    .wrap { width: min(var(--container), calc(100% - 2 * var(--space-4))); margin: var(--space-10) auto var(--space-12); scroll-margin-block-start: calc(64px + var(--space-4)); }
     .wrap:focus-visible { box-shadow: none; }
     .intro { margin-block-end: var(--space-6); }
     .intro h1 { max-width: 24ch; font-size: clamp(var(--text-2xl), 5vw, var(--text-4xl)); text-wrap: balance; }
     .intro p { margin: 0; text-wrap: pretty; }
-    .status { display: grid; grid-template-columns: auto 1fr; gap: var(--space-4); align-items: center; margin: 0 0 var(--space-6); padding: var(--space-4) var(--space-5); background: var(--surface); border: var(--border-hairline) solid var(--border); border-radius: var(--radius-lg); }
+    .status { display: grid; grid-template-columns: auto 1fr; gap: var(--space-4); align-items: center; margin: 0 0 var(--space-6); padding: var(--space-4) var(--space-5); background: linear-gradient(var(--surface), var(--surface)) padding-box, var(--holo-edge) border-box; background-color: var(--surface); border: var(--border-hairline) solid transparent; border-radius: var(--radius-lg); }
     .status .chip { justify-self: start; color: var(--color-warning-light); font-weight: var(--weight-semibold); letter-spacing: .04em; }
     .status.good .chip { color: var(--color-success-light); }
     .status.bad .chip { color: var(--color-error-light); }
@@ -31,6 +31,7 @@
     section[hidden] { display: none; }
     .truth { max-width: none; margin: 0 0 var(--space-4); padding: var(--space-3) var(--space-4); background: var(--bg-deep); border: var(--border-hairline) solid var(--border-subtle); border-radius: var(--radius-md); color: var(--text-sub); font-size: var(--text-sm); }
     .table-wrap { overflow-x: auto; border: var(--border-hairline) solid var(--border-subtle); border-radius: var(--radius-md); }
+    .table-wrap:focus-visible { outline: var(--border-focus) solid var(--focus); outline-offset: 3px; }
     .table { min-width: 860px; }
     .table th { background: var(--bg-deep); text-transform: none; letter-spacing: var(--tracking-normal); white-space: nowrap; }
     .table td { font-family: var(--font-mono); font-variant-numeric: tabular-nums lining-nums; vertical-align: middle; }
@@ -52,6 +53,7 @@
       .panel.card { padding: var(--space-4); }
     }
     @media (forced-colors: active) {
+      .status { background: Canvas; border-color: CanvasText; }
       nav[aria-label="Bench planes"] .btn[aria-pressed="true"] { outline: 2px solid ButtonText; }
       nav[aria-label="Bench planes"] .btn[aria-pressed="true"]:focus-visible { outline-color: Highlight; }
     }
@@ -64,6 +66,7 @@
   <div class="nav__links"><a class="nav__link" href="https://github.com/szl-holdings/frontier-bench">Source <span aria-hidden="true">→</span></a></div>
 </header>
 <main id="evidence" class="wrap" tabindex="-1">
+  <noscript><p class="truth">JavaScript is required to validate the evidence payload. No current results have been admitted in this browser; the source links remain available.</p></noscript>
   <header class="intro">
     <div class="eyebrow">SZL Bench Suite · evidence surface</div>
     <h1>Measured evidence, with an honest empty state.</h1>
@@ -83,11 +86,11 @@
 
   <section id="engine">
     <div class="panel card">
-      <h2 class="card-title">Engine evidence</h2>
+      <h2 class="card-title" id="engine-title">Engine evidence</h2>
       <div class="truth">Only receipt-backed observations appear here. The current display repository and its API are evidence consumers; they are not proof that an engine workload ran.</div>
-      <div class="table-wrap">
+      <div class="table-wrap" role="region" aria-labelledby="engine-title" tabindex="0">
         <table class="table">
-          <thead><tr><th>Model</th><th>Precision</th><th>Prompt tok/s</th><th>Decode tok/s</th><th>Peak VRAM</th><th>GPU</th><th>Date</th><th>Receipt</th></tr></thead>
+          <thead><tr><th scope="col">Model</th><th scope="col">Precision</th><th scope="col">Prompt tok/s</th><th scope="col">Decode tok/s</th><th scope="col">Peak VRAM</th><th scope="col">GPU</th><th scope="col">Date</th><th scope="col">Receipt</th></tr></thead>
           <tbody data-plane="engine"><tr class="empty"><td colspan="8">Checking evidence payload…</td></tr></tbody>
         </table>
       </div>
@@ -97,11 +100,11 @@
 
   <section id="retrieval" hidden>
     <div class="panel card">
-      <h2 class="card-title">Retrieval evidence</h2>
+      <h2 class="card-title" id="retrieval-title">Retrieval evidence</h2>
       <div class="truth">Rows require a compatible receipt that binds the named method, machine, time, and measured metrics. Hard-coded demo corpora are not silently presented as production evidence.</div>
-      <div class="table-wrap">
+      <div class="table-wrap" role="region" aria-labelledby="retrieval-title" tabindex="0">
         <table class="table">
-          <thead><tr><th>Corpus</th><th>Method</th><th>nDCG@10</th><th>Recall@100</th><th>MRR</th><th>p50 ms</th><th>GPU</th><th>Date</th><th>Receipt</th></tr></thead>
+          <thead><tr><th scope="col">Corpus</th><th scope="col">Method</th><th scope="col">nDCG@10</th><th scope="col">Recall@100</th><th scope="col">MRR</th><th scope="col">p50 ms</th><th scope="col">GPU</th><th scope="col">Date</th><th scope="col">Receipt</th></tr></thead>
           <tbody data-plane="retrieval"><tr class="empty"><td colspan="9">Checking evidence payload…</td></tr></tbody>
         </table>
       </div>
@@ -111,11 +114,11 @@
 
   <section id="quant" hidden>
     <div class="panel card">
-      <h2 class="card-title">Quantization evidence</h2>
+      <h2 class="card-title" id="quant-title">Quantization evidence</h2>
       <div class="truth">A plotted point must come from a compatible measured receipt. Synthetic logits, projections, and labels without model-weight and runtime provenance are not admitted.</div>
-      <div class="table-wrap">
+      <div class="table-wrap" role="region" aria-labelledby="quant-title" tabindex="0">
         <table class="table">
-          <thead><tr><th>Model</th><th>Precision</th><th>Perplexity</th><th>Decode tok/s</th><th>Peak VRAM</th><th>GPU</th><th>Date</th><th>Receipt</th></tr></thead>
+          <thead><tr><th scope="col">Model</th><th scope="col">Precision</th><th scope="col">Perplexity</th><th scope="col">Decode tok/s</th><th scope="col">Peak VRAM</th><th scope="col">GPU</th><th scope="col">Date</th><th scope="col">Receipt</th></tr></thead>
           <tbody data-plane="quant"><tr class="empty"><td colspan="8">Checking evidence payload…</td></tr></tbody>
         </table>
       </div>
