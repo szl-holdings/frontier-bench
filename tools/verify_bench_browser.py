@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-import mimetypes
 import os
 from pathlib import Path
 import re
@@ -42,19 +41,25 @@ def run(output: Path) -> None:
     template = (PACKAGE / "szl-bench-suite.index.html").read_text(encoding="utf-8")
     payload = local_fixture(template)
     index = template.replace("__RESULTS_JSON_SHA256__", hashlib.sha256(payload).hexdigest()).encode()
-    assets = {"/" + path.relative_to(PACKAGE).as_posix(): path.read_bytes()
-              for path in (PACKAGE / "szl").rglob("*") if path.is_file()}
-    content = {"/": index, "/index.html": index, "/results.json": payload, **assets}
+    # Closed fixture routes: request text selects a tuple but never supplies a
+    # header value, filename, directory enumeration, or MIME-type inference.
+    content = {
+        "/": (index, "text/html; charset=utf-8"),
+        "/index.html": (index, "text/html; charset=utf-8"),
+        "/results.json": (payload, "application/json"),
+        "/szl/SOURCE.json": ((PACKAGE / "szl/SOURCE.json").read_bytes(), "application/json"),
+        "/szl/szl-design-system.css": ((PACKAGE / "szl/szl-design-system.css").read_bytes(), "text/css"),
+        "/szl/logos/szl_favicon.svg": ((PACKAGE / "szl/logos/szl_favicon.svg").read_bytes(), "image/svg+xml"),
+    }
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             path = urlsplit(self.path).path
-            data = content.get(path)
-            self.send_response(200 if data is not None else 404)
-            media = "text/html" if path in ("/", "/index.html") else mimetypes.guess_type(path)[0] or "application/octet-stream"
+            data, media = content.get(path, (b"LOCAL FIXTURE: absent", "text/plain; charset=utf-8"))
+            self.send_response(200 if path in content else 404)
             self.send_header("Content-Type", media)
             self.end_headers()
-            self.wfile.write(data if data is not None else b"LOCAL FIXTURE: absent")
+            self.wfile.write(data)
 
         def log_message(self, *_args):
             pass
