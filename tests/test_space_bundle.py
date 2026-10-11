@@ -62,7 +62,12 @@ class SpaceBundleTests(unittest.TestCase):
         self.assertIn("\nsdk: static\n", readme)
         self.assertIn("\napp_file: index.html\n", readme)
         self.assertNotIn("colorFrom: cyan", readme)
-        self.assertNotIn("\nlicense:", readme)
+        self.assertIn("\nlicense: apache-2.0\n", readme)
+        self.assertIn("Apache License", (ROOT / "LICENSE").read_text(encoding="utf-8-sig"))
+        brand = json.loads((PACKAGE / "szl" / "SOURCE.json").read_text(encoding="utf-8"))
+        self.assertEqual(brand["license"]["code"], "Apache-2.0")
+        self.assertEqual(brand["license"]["brand_assets"], "CC BY 4.0")
+        self.assertIn("CC BY 4.0", readme)
 
     def test_accessible_truth_surface_files_exist(self) -> None:
         html = (PACKAGE / "szl-bench-suite.index.html").read_text(encoding="utf-8")

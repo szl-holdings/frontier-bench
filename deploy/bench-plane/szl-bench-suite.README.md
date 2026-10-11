@@ -7,6 +7,7 @@ sdk: static
 app_file: index.html
 pinned: false
 short_description: Receipt-gated engine, retrieval, and quantization evidence
+license: apache-2.0
 ---
 
 <p><a href="https://huggingface.co/spaces/SZLHOLDINGS/szl-command-lab"><img src="https://raw.githubusercontent.com/szl-holdings/.github/main/profile/assets/szl/logos/szl_mark_holographic.svg" alt="SZL Holdings" width="112" /></a></p>
@@ -24,6 +25,10 @@ Inspect admitted engine, retrieval and quantization evidence in one static surfa
 - EMPTY\_HONEST means zero admitted measured rows. UNAVAILABLE means the result payload could not be fetched or validated.
 - The page runs no benchmarks. Demos, fixtures and in-memory harness output are not measurements.
 - Controller HMACs authenticate operator assertions. The public page has no shared key or independently verifiable signature.
+
+## License and attribution
+
+Space code and documentation follow the canonical source's [Apache License 2.0](https://github.com/szl-holdings/frontier-bench/blob/a7b89eeb1c9aca5cae2cd046ec684c3f05f8c355/LICENSE). Bundled SZL KANCHAY brand assets carry **CC BY 4.0**, as recorded in [`szl/SOURCE.json`](./szl/SOURCE.json). This card does not assign a license to external workload inputs, datasets, or receipt artifacts.
 
 <details>
 <summary>Technical details and original evidence</summary>
