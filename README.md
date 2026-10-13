@@ -13,11 +13,13 @@
 [Product](https://a-11-oy.com) · [Proof](https://a11oy.net) · [GitHub organization](https://github.com/szl-holdings)
 <!-- /szl:header -->
 
-Measured inference-engine evidence for the SZL stack — the public bench for the **szl-forge** engine.
+A receipt-gated benchmark harness and public evidence surface for the SZL stack, including the **szl-forge** inference engine.
+
+**Current public state: EMPTY_HONEST.** No measured rows are admitted on the engine, retrieval, or quantization planes, and no dedicated measurement node is provisioned.
 
 ## What this is
 
-The honest companion to every engine claim. If the estate says the engine is fast, this is where the number lives — with the machine, the date, and the method attached. Unmeasured claims say so.
+The harness that engine, retrieval, and quantization claims must pass through before they are published. A measured number appears here only after its receipt is admitted, and it carries the machine, the date, and the method. Until then the surface shows an honest empty state. This repository makes no performance claim of its own.
 
 ## Guarantees
 
