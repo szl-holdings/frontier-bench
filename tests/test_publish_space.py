@@ -694,6 +694,63 @@ class CredentialCanaryTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 2)
 
 
+class CredentialSelectionTests(unittest.TestCase):
+    def invoke(self, candidates, checker):
+        with tempfile.TemporaryDirectory() as temporary:
+            out = Path(temporary) / "output"
+            text = io.StringIO()
+            env = {"GITHUB_OUTPUT": str(out), **{f"CANDIDATE_{k}": v for k, v in candidates.items()}}
+            with patch.dict(os.environ, env, clear=True), patch.object(publisher, "load_controller", return_value=controller), \
+                 patch.object(publisher, "check_write_credential", side_effect=checker) as check, contextlib.redirect_stdout(text):
+                code = publisher.main(["--select-write-credential"])
+            for value in candidates.values():
+                if value:
+                    self.assertNotIn(value, text.getvalue())
+            return code, json.loads(text.getvalue()), out.read_text() if out.exists() else "", check
+
+    def test_org_credential_is_preferred_only_after_validation(self):
+        code, report, output, check = self.invoke({"HF_ORG_TOKEN": "hf_ORG_FAKE", "HF_TOKEN": FAKE_TOKEN}, lambda *_: {"identity_matches": True})
+        self.assertEqual(code, 0)
+        self.assertEqual(output, "pick=HF_ORG_TOKEN\n")
+        self.assertEqual(report["selected"], "HF_ORG_TOKEN")
+        self.assertEqual(check.call_count, 1)
+
+    def test_invalid_org_credential_falls_back_to_verified_repo_credential(self):
+        def check(_controller, token):
+            if token == "hf_ORG_FAKE":
+                raise controller.BenchError("hub_auth", "not admitted", controller.EXIT_HUB_AUTH)
+            return {"identity_matches": True}
+        code, report, output, checked = self.invoke({"HF_ORG_TOKEN": "hf_ORG_FAKE", "HF_TOKEN": FAKE_TOKEN}, check)
+        self.assertEqual(code, 0)
+        self.assertEqual(output, "pick=HF_TOKEN\n")
+        self.assertFalse(report["candidates"][0]["verified"])
+        self.assertTrue(report["candidates"][1]["verified"])
+        self.assertEqual(checked.call_count, 2)
+
+    def test_no_admitted_candidate_emits_no_selection(self):
+        def reject(*_):
+            raise controller.BenchError("hub_auth", "not admitted", controller.EXIT_HUB_AUTH)
+        for candidates in ({}, {"HF_TOKEN": FAKE_TOKEN}, {"HF_ORG_TOKEN": "hf_ORG_FAKE", "HF_TOKEN": FAKE_TOKEN}):
+            code, report, output, _ = self.invoke(candidates, reject)
+            self.assertEqual(code, controller.EXIT_HUB_AUTH)
+            self.assertEqual(report["state"], "FAILED_CLOSED")
+            self.assertEqual(output, "")
+
+    def test_interrupt_does_not_try_next_candidate(self):
+        def interrupt(*_):
+            raise KeyboardInterrupt(FAKE_TOKEN)
+        code, _, output, checked = self.invoke({"HF_ORG_TOKEN": "hf_ORG_FAKE", "HF_TOKEN": FAKE_TOKEN}, interrupt)
+        self.assertEqual(code, controller.EXIT_INTERRUPTED)
+        self.assertEqual(output, "")
+        self.assertEqual(checked.call_count, 1)
+
+    def test_selection_rejects_mixed_or_cached_auth_modes(self):
+        for extra in (["--check-write-credential"], ["--use-cached-auth"], ["--bundle-dir", "x"], ["--verify-only"], ["--report", "x"]):
+            with self.subTest(extra=extra), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                publisher.main(["--select-write-credential", *extra])
+
+
+
 class WorkflowContractTests(unittest.TestCase):
     def test_main_and_weekly_publication_are_enabled_while_prs_stay_read_only(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "bench.yml").read_text(encoding="utf-8")
@@ -701,12 +758,22 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("github.event_name != 'pull_request'", workflow)
         self.assertNotIn("Scheduled publication is intentionally disabled", workflow)
 
+    def test_publication_and_canary_use_only_the_validated_candidate(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "bench.yml").read_text()
+        publish = workflow.split("\n  publish:\n", 1)[1]
+        self.assertIn("--select-write-credential", publish)
+        self.assertIn("CANDIDATE_HF_ORG_TOKEN: ${{ secrets.HF_ORG_TOKEN }}", publish)
+        self.assertIn("CANDIDATE_HF_TOKEN: ${{ secrets.HF_TOKEN }}", publish)
+        selection = "HF_TOKEN: ${{ steps.publication_credential.outputs.pick == 'HF_ORG_TOKEN' && secrets.HF_ORG_TOKEN || secrets.HF_TOKEN }}"
+        self.assertEqual(publish.count(selection), 2)
+        self.assertLess(publish.index("--select-write-credential"), publish.index("--bundle-dir /tmp/szl-bench-publish/bundle"))
+
     def test_scheduled_and_manual_runs_exercise_the_write_credential(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "bench.yml").read_text(encoding="utf-8")
         publish_job = workflow.split("\n  publish:\n", 1)[1]
         step = publish_job.split("- name: Write-credential canary", 1)[1]
         self.assertIn("if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'", step)
-        self.assertIn("HF_TOKEN: ${{ secrets.HF_TOKEN }}", step)
+        self.assertIn("HF_TOKEN: ${{ steps.publication_credential.outputs.pick", step)
         self.assertIn("tools/publish_space.py --check-write-credential", step)
 
 
