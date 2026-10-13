@@ -45,7 +45,15 @@ An unchanged healthy public bundle is verified without a provider credential; an
 content or runtime write fails closed unless the owner credential is available.
 The canonical workflow publishes on main pushes, Mondays at 06:17 UTC, and manual
 main dispatches, under one Space-scoped writer lock. Writes require the scoped
-`HF_TOKEN` Actions secret; pull requests never publish.
+`HF_TOKEN` Actions secret; pull requests never publish. Scheduled and manual
+runs also check the credential's current identity, exact target write scope,
+organization role and security restrictions, and the Space's explicitly expanded
+resource-group ACL using read-only provider calls. This metadata canary does not
+attempt a write or guarantee that authorization will remain valid later. If the
+provider omits group metadata, only its documented organization-admin override
+can pass; other roles fail closed because public readability does not prove
+write access.
+
 
 For an explicitly read-only deployment check, first export the reviewed bundle as
 described in the operations guide, then run:

@@ -520,7 +520,7 @@ class CredentialCanaryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.api = Mock()
         self.api.whoami.return_value = identity_fixture()
-        self.api.space_info.return_value = SimpleNamespace(id=publisher.TARGET, sha="a" * 40)
+        self.api.space_info.return_value = SimpleNamespace(id=publisher.TARGET, sha="a" * 40, resource_group=None)
         self.factory = Mock(return_value=self.api)
 
     def run_check(self, *, token: str | None = FAKE_TOKEN, extra: list[str] | None = None) -> tuple[int, dict, str]:
@@ -546,9 +546,10 @@ class CredentialCanaryTests(unittest.TestCase):
         self.assertEqual(report["state"], "WRITE_CREDENTIAL_VERIFIED")
         self.assertEqual(report["remote_mutation"], "NOT_ATTEMPTED")
         self.assertEqual(report["credential"], {"identity": "betterwithage", "identity_matches": True,
-                                                "token_write_scope": True, "org_write_role": True, "space_visible": True})
+                                                "token_write_scope": True, "org_write_role": True, "org_policy_clear": True,
+                                                "space_visible": True, "resource_group_write_access": True})
         self.factory.assert_called_once_with(token=FAKE_TOKEN)
-        self.api.space_info.assert_called_once_with(repo_id=publisher.TARGET)
+        self.api.space_info.assert_called_once_with(repo_id=publisher.TARGET, expand=["resourceGroup"])
 
     def test_fine_grained_repo_write_on_org_or_space_passes(self) -> None:
         for entity in ({"type": "org", "name": "SZLHOLDINGS"}, {"type": "space", "name": publisher.TARGET}):
@@ -602,6 +603,69 @@ class CredentialCanaryTests(unittest.TestCase):
         self.assertEqual(code, controller.EXIT_HUB_AUTH)
         self.assertIn("HTTP 404", report["failure"]["error"])
         self.assertFalse(report["credential"]["space_visible"])
+
+    def test_org_security_restrictions_block_even_admin_and_public_space(self) -> None:
+        for restrictions in (["token-policy"], ["mfa"], ["sso"], ["ip"], ["token-revoked"], None, "", {}):
+            with self.subTest(restrictions=restrictions):
+                self.api.reset_mock()
+                identity = identity_fixture(org_role="admin")
+                identity["orgs"][0]["securityRestrictions"] = restrictions
+                self.api.whoami.return_value = identity
+                code, report, _ = self.run_check()
+                self.assertEqual(code, controller.EXIT_HUB_AUTH)
+                self.assertFalse(report["credential"]["org_policy_clear"])
+                self.api.space_info.assert_not_called()
+
+    def test_resource_group_requires_exact_membership_write_role(self) -> None:
+        group_id = "a" * 24
+        self.api.space_info.return_value.resource_group = {"id": group_id, "name": "bench"}
+        cases = ((None, False), ([], False), ([{"id": "b" * 24, "role": "write"}], False),
+                 ([{"id": group_id, "role": "read"}], False),
+                 ([{"id": group_id, "role": "contributor"}], False),
+                 ([{"id": group_id, "role": "write"}], True),
+                 ([{"id": group_id, "role": "admin"}], True),
+                 ([{"id": group_id, "role": "write"}, {"id": group_id, "role": "read"}], False))
+        for groups, allowed in cases:
+            with self.subTest(groups=groups):
+                identity = identity_fixture(org_role="write")
+                identity["orgs"][0]["resourceGroups"] = groups
+                identity["orgs"][0]["securityRestrictions"] = []
+                self.api.whoami.return_value = identity
+                code, report, _ = self.run_check()
+                self.assertEqual(code, 0 if allowed else controller.EXIT_HUB_AUTH)
+                self.assertEqual(report["credential"]["resource_group_write_access"], allowed)
+
+    def test_org_admin_has_resource_group_override_but_malformed_metadata_fails(self) -> None:
+        self.api.whoami.return_value = identity_fixture(org_role="admin")
+        self.api.space_info.return_value.resource_group = {"id": "a" * 24, "name": "bench"}
+        self.assertEqual(self.run_check()[0], 0)
+        for malformed in (False, {}, {"id": ""}, {"id": 42}, [], "group"):
+            with self.subTest(group=malformed):
+                self.api.space_info.return_value.resource_group = malformed
+                self.assertEqual(self.run_check()[0], controller.EXIT_HUB_AUTH)
+        del self.api.space_info.return_value.resource_group
+        self.assertEqual(self.run_check()[0], controller.EXIT_HUB_AUTH)
+
+    def test_sdk_none_from_omitted_or_null_group_does_not_admit_org_writer(self) -> None:
+        self.api.whoami.return_value = identity_fixture(org_role="write")
+        # Real SpaceInfo always creates this attribute, defaulting to None
+        # even when resourceGroup was absent from the HTTP response.
+        self.api.space_info.return_value.resource_group = None
+        code, report, _ = self.run_check()
+        self.assertEqual(code, controller.EXIT_HUB_AUTH)
+        self.assertFalse(report["credential"]["resource_group_write_access"])
+
+    def test_duplicate_target_org_is_not_authority(self) -> None:
+        identity = identity_fixture()
+        identity["orgs"] *= 2
+        self.api.whoami.return_value = identity
+        self.assertEqual(self.run_check()[0], controller.EXIT_HUB_AUTH)
+
+    def test_interrupt_is_reported_without_provider_body(self) -> None:
+        self.api.whoami.side_effect = KeyboardInterrupt(FAKE_TOKEN)
+        code, report, _ = self.run_check()
+        self.assertEqual(code, controller.EXIT_INTERRUPTED)
+        self.assertEqual(report["state"], "FAILED_CLOSED")
 
     def test_missing_token_fails_before_contacting_provider(self) -> None:
         code, report, _ = self.run_check(token=None)

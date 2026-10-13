@@ -10,6 +10,7 @@ import importlib.util
 import json
 import math
 import os
+import re
 import secrets
 import sys
 import tempfile
@@ -236,15 +237,17 @@ def _token_can_write_target(access_token: Any) -> bool:
 
 
 def check_write_credential(controller: ModuleType, token: str) -> dict[str, Any]:
-    """Prove the publication credential could write, without writing.
+    """Check the provider's current write authorization metadata without writing.
 
-    Read-only calls only (whoami, space_info). The result carries the identity
-    name and booleans, never the token or provider response bodies.
+    Read-only calls only (whoami, space_info with resourceGroup expansion).
+    This is a point-in-time authorization check, not an attempted write. The
+    result carries the identity name and booleans, never provider bodies.
     """
     from huggingface_hub import HfApi
 
     evidence: dict[str, Any] = {"identity": None, "identity_matches": False, "token_write_scope": False,
-                                "org_write_role": False, "space_visible": False}
+                                "org_write_role": False, "org_policy_clear": False,
+                                "space_visible": False, "resource_group_write_access": False}
     api = HfApi(token=token)
     try:
         identity = api.whoami()
@@ -260,19 +263,27 @@ def check_write_credential(controller: ModuleType, token: str) -> dict[str, Any]
     auth = identity.get("auth")
     evidence["token_write_scope"] = _token_can_write_target(auth.get("accessToken") if isinstance(auth, dict) else None)
     orgs = identity.get("orgs")
-    evidence["org_write_role"] = any(
-        isinstance(org, dict) and str(org.get("name", "")).lower() == TARGET_ORG.lower()
-        and str(org.get("roleInOrg", "")).lower() in ORG_WRITE_ROLES
-        for org in (orgs if isinstance(orgs, list) else [])
-    )
+    matching_orgs = [org for org in (orgs if isinstance(orgs, list) else [])
+                     if isinstance(org, dict) and str(org.get("name", "")).lower() == TARGET_ORG.lower()]
+    org = matching_orgs[0] if len(matching_orgs) == 1 else {}
+    evidence["org_write_role"] = org.get("roleInOrg") in ORG_WRITE_ROLES
+    # whoami-v2 declares restrictions for this authentication method. Public
+    # repository reads do not override token-policy, MFA, SSO, revocation or IP
+    # restrictions. Absent is allowed by the provider's optional-field schema.
+    restrictions = org.get("securityRestrictions", [])
+    evidence["org_policy_clear"] = bool(org) and isinstance(restrictions, list) and not restrictions
     if not evidence["identity_matches"]:
         raise controller.BenchError("hub_auth", f"write credential belongs to {name!r}, expected {EXPECTED_USER!r}", controller.EXIT_HUB_AUTH, detail=evidence)
     if not evidence["token_write_scope"]:
         raise controller.BenchError("hub_auth", f"write credential lacks write scope for {TARGET}", controller.EXIT_HUB_AUTH, detail=evidence)
     if not evidence["org_write_role"]:
         raise controller.BenchError("hub_auth", f"{name!r} lacks an admin or write role in {TARGET_ORG}", controller.EXIT_HUB_AUTH, detail=evidence)
+    if not evidence["org_policy_clear"]:
+        raise controller.BenchError("hub_auth", f"write credential has unresolved security restrictions in {TARGET_ORG}", controller.EXIT_HUB_AUTH, detail=evidence)
     try:
-        info = api.space_info(repo_id=TARGET)
+        # The default public Space response may omit its resource group. Ask
+        # explicitly so a readable public repository cannot hide a denied ACL.
+        info = api.space_info(repo_id=TARGET, expand=["resourceGroup"])
     except Exception as exc:
         status = getattr(getattr(exc, "response", None), "status_code", None)
         raise controller.BenchError("hub_auth", f"write credential could not read {TARGET} (HTTP {status or 'unknown'})",
@@ -280,6 +291,21 @@ def check_write_credential(controller: ModuleType, token: str) -> dict[str, Any]
     evidence["space_visible"] = str(getattr(info, "id", "")).lower() == TARGET.lower()
     if not evidence["space_visible"]:
         raise controller.BenchError("hub_auth", "provider returned an unexpected Space identity", controller.EXIT_HUB_AUTH, detail=evidence)
+    group = getattr(info, "resource_group", False)
+    if group is None:
+        # The pinned SDK maps both omitted and null resourceGroup to None.
+        # That is not proof of an ungrouped repository. Only the documented
+        # org-admin override can establish access without group metadata.
+        evidence["resource_group_write_access"] = org.get("roleInOrg") == "admin"
+    elif isinstance(group, dict) and isinstance(group.get("id"), str) and re.fullmatch(r"[0-9a-f]{24}", group["id"]):
+        memberships = org.get("resourceGroups")
+        matching_groups = [entry for entry in (memberships if isinstance(memberships, list) else [])
+                           if isinstance(entry, dict) and entry.get("id") == group["id"]]
+        evidence["resource_group_write_access"] = org.get("roleInOrg") == "admin" or (
+            len(matching_groups) == 1 and matching_groups[0].get("role") in ORG_WRITE_ROLES
+        )
+    if not evidence["resource_group_write_access"]:
+        raise controller.BenchError("hub_auth", "write credential lacks verified access to the Space resource group", controller.EXIT_HUB_AUTH, detail=evidence)
     return evidence
 
 
@@ -297,10 +323,12 @@ def run_credential_check(controller: ModuleType, use_cached_auth: bool) -> int:
         if not token:
             raise controller.BenchError("hub_auth", "HF_TOKEN is required for the write-credential check", controller.EXIT_HUB_AUTH)
         report["credential"] = check_write_credential(controller, token)
-        token = None
         report["state"], report["exit_code"] = "WRITE_CREDENTIAL_VERIFIED", 0
-    except BaseException as exc:
-        exit_code = controller.EXIT_INTERRUPTED if isinstance(exc, (KeyboardInterrupt, SystemExit)) else getattr(exc, "exit_code", controller.EXIT_INTERNAL)
+    except (KeyboardInterrupt, SystemExit):
+        report["state"], report["exit_code"] = "FAILED_CLOSED", controller.EXIT_INTERRUPTED
+        report["failure"] = {"phase": "hub_auth", "error": "credential check interrupted"}
+    except Exception as exc:
+        exit_code = getattr(exc, "exit_code", controller.EXIT_INTERNAL)
         report["state"], report["exit_code"] = "FAILED_CLOSED", exit_code
         if isinstance(getattr(exc, "detail", None), dict):
             report["credential"] = exc.detail
@@ -312,7 +340,7 @@ def run_credential_check(controller: ModuleType, use_cached_auth: bool) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle-dir", type=Path, help="directory exported by the reviewed controller audit (required unless --check-write-credential)")
-    parser.add_argument("--check-write-credential", action="store_true", help="prove HF_TOKEN is a live write credential for the Space using read-only calls; never publishes")
+    parser.add_argument("--check-write-credential", action="store_true", help="check HF_TOKEN authorization metadata for the Space using read-only calls; never publishes")
     parser.add_argument("--git-bin", help="optional absolute trusted Git executable path")
     parser.add_argument("--report", type=Path, help="new local JSON report path; defaults to .bench-plane-publish/<run-id>.json")
     parser.add_argument("--verify-only", action="store_true", help="verify the existing public bundle anonymously; never resolve write credentials or modify the Space")
