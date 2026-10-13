@@ -218,6 +218,27 @@ def verify_anonymous_noop(controller: ModuleType, files: dict[str, bytes], run_r
     }
 
 
+TOKEN_KINDS = ("read", "write", "fineGrained")
+
+
+def _token_shape(access_token: Any) -> tuple[str, list[str]]:
+    """Non-secret token metadata: the provider role and the entity types holding repo.write.
+
+    Lets a failed selection distinguish a read token, or a fine-grained token
+    scoped only to the user, from a token scoped elsewhere, without names or values.
+    """
+    if not isinstance(access_token, dict):
+        return "unknown", []
+    role = access_token.get("role")
+    kind = role if role in TOKEN_KINDS else "unknown"
+    fine_grained = access_token.get("fineGrained")
+    scoped = fine_grained.get("scoped") if isinstance(fine_grained, dict) else None
+    types = {str(entry["entity"].get("type", "")).lower() for entry in (scoped if isinstance(scoped, list) else [])
+             if isinstance(entry, dict) and isinstance(entry.get("entity"), dict)
+             and isinstance(entry.get("permissions"), list) and "repo.write" in entry["permissions"]}
+    return kind, sorted(name for name in types if name in ("user", "org", "model", "dataset", "space"))
+
+
 def _token_can_write_target(access_token: Any) -> bool:
     """True only for a classic write token or a fine-grained repo.write scope on the org or this Space."""
     if not isinstance(access_token, dict):
@@ -249,7 +270,8 @@ def check_write_credential(controller: ModuleType, token: str) -> dict[str, Any]
     """
     from huggingface_hub import HfApi
 
-    evidence: dict[str, Any] = {"identity": None, "identity_matches": False, "token_write_scope": False,
+    evidence: dict[str, Any] = {"identity": None, "identity_matches": False, "token_kind": "unknown",
+                                "token_write_entity_types": [], "token_write_scope": False,
                                 "org_write_role": False, "org_policy_clear": False,
                                 "space_visible": False, "resource_group_write_access": False}
     api = HfApi(token=token)
@@ -265,7 +287,9 @@ def check_write_credential(controller: ModuleType, token: str) -> dict[str, Any]
     evidence["identity"] = name
     evidence["identity_matches"] = identity.get("type", "user") == "user" and name.lower() == EXPECTED_USER.lower()
     auth = identity.get("auth")
-    evidence["token_write_scope"] = _token_can_write_target(auth.get("accessToken") if isinstance(auth, dict) else None)
+    access_token = auth.get("accessToken") if isinstance(auth, dict) else None
+    evidence["token_kind"], evidence["token_write_entity_types"] = _token_shape(access_token)
+    evidence["token_write_scope"] = _token_can_write_target(access_token)
     orgs = identity.get("orgs")
     matching_orgs = [org for org in (orgs if isinstance(orgs, list) else [])
                      if isinstance(org, dict) and str(org.get("name", "")).lower() == TARGET_ORG.lower()]
@@ -361,6 +385,8 @@ def run_credential_selection(controller: ModuleType) -> int:
                 row["credential"] = check_write_credential(controller, token)
             except controller.BenchError as exc:
                 row["failure"] = {"phase": exc.phase, "error": controller.redact(exc)}
+                if isinstance(exc.detail, dict):
+                    row["credential"] = exc.detail  # identity and booleans only, never provider bodies
                 continue
             row["verified"] = True
             selected = name

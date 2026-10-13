@@ -555,6 +555,7 @@ class CredentialCanaryTests(unittest.TestCase):
         self.assertEqual(report["state"], "WRITE_CREDENTIAL_VERIFIED")
         self.assertEqual(report["remote_mutation"], "NOT_ATTEMPTED")
         self.assertEqual(report["credential"], {"identity": "betterwithage", "identity_matches": True,
+                                                "token_kind": "write", "token_write_entity_types": [],
                                                 "token_write_scope": True, "org_write_role": True, "org_policy_clear": True,
                                                 "space_visible": True, "resource_group_write_access": True})
         self.factory.assert_called_once_with(token=FAKE_TOKEN)
@@ -567,6 +568,23 @@ class CredentialCanaryTests(unittest.TestCase):
                     "global": [], "scoped": [{"entity": entity, "permissions": ["repo.content.read", "repo.write"]}]})
                 code, report, _ = self.run_check()
                 self.assertEqual(code, 0, report)
+
+    def test_user_scoped_fine_grained_token_reports_its_shape_without_names(self) -> None:
+        self.api.whoami.return_value = identity_fixture(role="fineGrained", fine_grained={
+            "global": [], "scoped": [{"entity": {"type": "user", "name": "betterwithage"}, "permissions": ["repo.write"]},
+                                     {"entity": {"type": "org", "name": "SZLHOLDINGS"}, "permissions": ["repo.content.read"]}]})
+        code, report, text = self.run_check()
+        self.assertEqual(code, controller.EXIT_HUB_AUTH)
+        self.assertEqual(report["credential"]["token_kind"], "fineGrained")
+        self.assertEqual(report["credential"]["token_write_entity_types"], ["user"])
+        self.assertFalse(report["credential"]["token_write_scope"])
+        self.assertNotIn("SZLHOLDINGS", json.dumps(report["credential"]))
+
+    def test_read_role_token_is_reported_as_read(self) -> None:
+        self.api.whoami.return_value = identity_fixture(role="read")
+        code, report, _ = self.run_check()
+        self.assertEqual(code, controller.EXIT_HUB_AUTH)
+        self.assertEqual((report["credential"]["token_kind"], report["credential"]["token_write_scope"]), ("read", False))
 
     def test_revoked_token_fails_closed_with_redacted_output(self) -> None:
         class Unauthorized(Exception):
@@ -726,6 +744,21 @@ class CredentialSelectionTests(unittest.TestCase):
         self.assertFalse(report["candidates"][0]["verified"])
         self.assertTrue(report["candidates"][1]["verified"])
         self.assertEqual(checked.call_count, 2)
+
+    def test_rejected_candidates_keep_their_non_secret_evidence(self):
+        def reject(_controller, token):
+            detail = {"identity": "betterwithage", "identity_matches": True, "token_kind": "fineGrained",
+                      "token_write_entity_types": ["user"], "token_write_scope": False}
+            raise controller.BenchError("hub_auth", "lacks write scope", controller.EXIT_HUB_AUTH, detail=detail)
+        code, report, output, _ = self.invoke({"HF_TOKEN": FAKE_TOKEN}, reject)
+        self.assertEqual(code, controller.EXIT_HUB_AUTH)
+        self.assertEqual(output, "")
+        absent, row = report["candidates"]
+        self.assertEqual((absent["secret"], absent["present"]), ("HF_ORG_TOKEN", False))
+        self.assertNotIn("credential", absent)
+        self.assertEqual((row["secret"], row["verified"]), ("HF_TOKEN", False))
+        self.assertEqual(row["credential"]["token_write_entity_types"], ["user"])
+        self.assertEqual(row["failure"]["phase"], "hub_auth")
 
     def test_no_admitted_candidate_emits_no_selection(self):
         def reject(*_):
