@@ -108,6 +108,12 @@ SPACE_STATIC_ASSETS: Mapping[str, str] = {
 }
 SPACE_CORE_FILES: tuple[str, ...] = ("README.md", "index.html", "results.json")
 SPACE_MANAGED_FILES: tuple[str, ...] = SPACE_CORE_FILES + tuple(SPACE_STATIC_ASSETS)
+# Files this publisher once owned (or the provider's static template created)
+# that the reviewed surface no longer serves. They are never exported or
+# uploaded; an authenticated publication deletes them when present and the
+# immutable readback requires their absence.
+SPACE_RETIRED_FILES: tuple[str, ...] = ("style.css",)
+SPACE_COMMIT_SCOPE: tuple[str, ...] = SPACE_MANAGED_FILES + SPACE_RETIRED_FILES
 
 
 EXIT_CLI = 2
@@ -2306,7 +2312,8 @@ def hub_preflight(args: argparse.Namespace, download_root: pathlib.Path) -> HubC
         raise BenchError("hub_auth", f"could not inventory Space files at immutable parent: {redact(exc)}", EXIT_HUB_AUTH) from exc
     download_root = ensure_private_directory(download_root, phase="hub_readback", exit_code=EXIT_HUB_READBACK)
     managed: dict[str, bytes | None] = {}
-    for filename in SPACE_MANAGED_FILES:
+    # Retired files are read too so a failed witness can restore the parent exactly.
+    for filename in SPACE_COMMIT_SCOPE:
         managed[filename] = (
             _download_hub_file_strict(SPACE_ID, filename, parent, token, download_root)
             if filename in files
@@ -2506,17 +2513,19 @@ def publish_and_witness(
         not hmac.compare_digest(sha256_bytes(data), SPACE_STATIC_ASSETS[name]) for name, data in static_assets.items()
     ):
         raise BenchError("hub_commit", "vendored Space assets do not match their reviewed digests", EXIT_HUB_COMMIT)
-    parent_files: dict[str, bytes | None] = {name: context.managed_parent_files.get(name) for name in SPACE_MANAGED_FILES}
+    parent_files: dict[str, bytes | None] = {name: context.managed_parent_files.get(name) for name in SPACE_COMMIT_SCOPE}
     desired: dict[str, bytes | None] = dict(parent_files)
     desired["results.json"] = payload_bytes
     desired["index.html"] = index_bytes
     desired.update(static_assets)
     if context.readme_bytes is not None:
         desired["README.md"] = context.readme_bytes
+    for retired in SPACE_RETIRED_FILES:
+        desired[retired] = None
 
     def operations_between(current: Mapping[str, bytes | None], target: Mapping[str, bytes | None]) -> list[Any]:
         operations: list[Any] = []
-        for filename in SPACE_MANAGED_FILES:
+        for filename in SPACE_COMMIT_SCOPE:
             before, after = current.get(filename), target.get(filename)
             if before == after:
                 continue

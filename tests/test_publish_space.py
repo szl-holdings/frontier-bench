@@ -479,6 +479,15 @@ class AnonymousWitnessTests(unittest.TestCase):
         self.api.list_repo_files.return_value = ["README.md", "index.html", "results.json"]
         self.assertIsNone(self.invoke())
 
+    def test_retired_remote_file_requires_authenticated_cleanup(self) -> None:
+        self.assertIn("style.css", controller.SPACE_RETIRED_FILES)
+        self.api.list_repo_files.return_value = [*self.files, "style.css"]
+        self.assertIsNone(self.invoke())
+
+    def test_unrelated_extra_remote_file_still_allows_noop(self) -> None:
+        self.api.list_repo_files.return_value = [*self.files, ".gitattributes"]
+        self.assertFalse(self.invoke()["changed"])
+
     def test_public_szl_asset_mismatch_cannot_be_noop_success(self) -> None:
         with self.assertRaisesRegex(controller.BenchError, "differs from the reviewed vendored asset"):
             self.invoke(public={**self.files, "szl/szl-design-system.css": b"different"})

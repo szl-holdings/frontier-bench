@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import ast
 import contextlib
 import datetime as dt
@@ -1020,6 +1021,102 @@ class HubPublicationTests(unittest.TestCase):
         for name, data in STATIC_ASSETS.items():
             self.assertEqual(published[name], data)
         self.assertEqual(result["public_static_asset_sha256"], dict(bench.SPACE_STATIC_ASSETS))
+
+    def _current_bundle_with_retired_style(self) -> tuple[bytes, dict[str, bytes]]:
+        payload = b'{"fixture":"stable"}\n'
+        index = bench.finalize_space_index((HERE / "szl-bench-suite.index.html").read_bytes(), payload)
+        files = {"README.md": (HERE / "szl-bench-suite.README.md").read_bytes(), "index.html": index,
+                 "results.json": payload, **STATIC_ASSETS, "style.css": b"/* HF static template */\n"}
+        return payload, files
+
+    def test_retired_files_are_never_exported_or_uploaded(self) -> None:
+        self.assertEqual(bench.SPACE_RETIRED_FILES, ("style.css",))
+        self.assertFalse(set(bench.SPACE_RETIRED_FILES) & set(bench.SPACE_MANAGED_FILES))
+        self.assertEqual(bench.SPACE_COMMIT_SCOPE, bench.SPACE_MANAGED_FILES + bench.SPACE_RETIRED_FILES)
+
+    def test_preflight_captures_present_retired_files_for_exact_rollback(self) -> None:
+        parent = "a" * 40
+        _, files = self._current_bundle_with_retired_style()
+        api = _FakeHubApi(parent, files)
+        api.whoami = lambda: {"name": "betterwithage"}
+        original_repo_info = api.repo_info
+        api.repo_info = lambda **kwargs: types.SimpleNamespace(
+            id=bench.SPACE_ID, sha=original_repo_info(**kwargs).sha, sdk="static")
+        args = argparse.Namespace(hf_token_env="SZL_TEST_HF_TOKEN", expected_hf_user="betterwithage",
+                                  space_readme=str(HERE / "szl-bench-suite.README.md"),
+                                  space_index=str(HERE / "szl-bench-suite.index.html"))
+        with tempfile.TemporaryDirectory() as raw, fake_hub(api, lambda *_a, **_k: (b"", {})), \
+                mock.patch.dict(sys.modules["huggingface_hub"].__dict__, {"HfApi": lambda token: api}), \
+                mock.patch.dict(os.environ, {"SZL_TEST_HF_TOKEN": "hf_UNIT_TEST_NOT_A_REAL_CREDENTIAL"}):
+            context = bench.hub_preflight(args, pathlib.Path(raw) / "downloads")
+        self.assertEqual(set(context.managed_parent_files), set(bench.SPACE_COMMIT_SCOPE))
+        self.assertEqual(context.managed_parent_files["style.css"], files["style.css"])
+
+    def test_retired_style_css_is_deleted_and_absence_is_read_back(self) -> None:
+        parent = "a" * 40
+        payload, files = self._current_bundle_with_retired_style()
+        api = _FakeHubApi(parent, files)
+        recorded: list[list[object]] = []
+        create_commit = api.create_commit
+
+        def recording_commit(*, operations: list[object], **kwargs: object) -> object:
+            recorded.append(list(operations))
+            return create_commit(operations=operations, **kwargs)
+
+        api.create_commit = recording_commit
+        inventories: list[str] = []
+        list_repo_files = api.list_repo_files
+
+        def recording_inventory(*, revision: str, **kwargs: object) -> list[str]:
+            inventories.append(revision)
+            return list_repo_files(revision=revision, **kwargs)
+
+        api.list_repo_files = recording_inventory
+        context = self.context(api, parent, {name: files.get(name) for name in bench.SPACE_COMMIT_SCOPE})
+        with fake_hub(api, self.public_server(lambda revision: api.revisions[revision])):
+            result = bench.publish_and_witness(context, payload, provider_timeout=0.1, public_http_deadline=0.1)
+        self.assertTrue(result["changed"])
+        self.assertEqual(api.commits, 1)
+        self.assertEqual(len(recorded), 1)
+        self.assertEqual([(type(op), op.path_in_repo) for op in recorded[0]], [(_FakeDelete, "style.css")])
+        published = api.revisions[result["commit"]]
+        self.assertNotIn("style.css", published)
+        self.assertEqual(set(published), set(bench.SPACE_MANAGED_FILES))
+        self.assertIn(result["commit"], inventories, "absence must be checked on the immutable commit inventory")
+
+    def test_retired_file_surviving_the_commit_fails_readback_and_rolls_back(self) -> None:
+        parent = "a" * 40
+        payload, files = self._current_bundle_with_retired_style()
+        api = _FakeHubApi(parent, files)
+        create_commit = api.create_commit
+
+        def commit_ignoring_deletes(*, operations: list[object], **kwargs: object) -> object:
+            return create_commit(operations=[op for op in operations if not isinstance(op, _FakeDelete)], **kwargs)
+
+        api.create_commit = commit_ignoring_deletes
+        context = self.context(api, parent, {name: files.get(name) for name in bench.SPACE_COMMIT_SCOPE})
+        with fake_hub(api, self.public_server(lambda revision: api.revisions[revision])):
+            with self.assertRaises(bench.BenchError) as captured:
+                bench.publish_and_witness(context, payload, provider_timeout=0.1, public_http_deadline=0.1)
+        self.assertIn("style.css unexpectedly exists", captured.exception.detail["publication_error"])
+        self.assertEqual(captured.exception.detail["compensation"]["state"], "PUBLISH_FAILED_ROLLBACK_VERIFIED")
+        self.assertEqual(api.revisions[api.head], files)
+
+    def test_failed_witness_after_retired_delete_restores_the_retired_file(self) -> None:
+        parent = "a" * 40
+        payload, files = self._current_bundle_with_retired_style()
+        api = _FakeHubApi(parent, files)
+
+        def wrong_http(url: str, **_: object) -> tuple[bytes, dict[str, str]]:
+            return b"wrong", {"Content-Type": "application/json" if "results.json" in url else "text/html", "X-Repo-Commit": parent}
+
+        context = self.context(api, parent, {name: files.get(name) for name in bench.SPACE_COMMIT_SCOPE})
+        with fake_hub(api, wrong_http):
+            with self.assertRaises(bench.BenchError) as captured:
+                bench.publish_and_witness(context, payload, provider_timeout=0.1, public_http_deadline=0.01)
+        self.assertEqual(captured.exception.detail["compensation"]["state"], "PUBLISH_FAILED_ROLLBACK_VERIFIED")
+        self.assertEqual(api.commits, 2)
+        self.assertEqual(api.revisions[api.head], files)
 
     def test_tampered_context_assets_abort_before_remote_mutation(self) -> None:
         parent = "a" * 40
