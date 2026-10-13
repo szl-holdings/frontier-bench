@@ -76,3 +76,11 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           SZL_BENCH_RECEIPT_HMAC_KEY_HEX: ${{ secrets.SZL_BENCH_RECEIPT_HMAC_KEY_HEX }}
         run: python -I -B tools/publish_space.py --bundle-dir /tmp/szl-bench-publish/bundle
+      - name: Write-credential canary (read-only; fails red on a dead HF_TOKEN)
+        # An unchanged bundle is witnessed anonymously, so publication alone
+        # never exercises HF_TOKEN. Scheduled and manual runs check its
+        # current write authorization metadata without writing.
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python -I -B tools/publish_space.py --check-write-credential

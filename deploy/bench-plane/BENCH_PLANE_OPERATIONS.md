@@ -222,6 +222,22 @@ commits, or restarts the Space, even if `--use-cached-auth` is also supplied. A 
 bundle or unhealthy runtime fails with exit 53 rather than falling back to a write.
 The JSON report records `mode: VERIFY_ONLY`; verification is not a new publication.
 
+Because an unchanged bundle is witnessed anonymously, a routine publication never
+exercises `HF_TOKEN`. Scheduled and manual runs therefore also run
+`tools/publish_space.py --check-write-credential`, a read-only canary. It calls
+`whoami` and `space_info` with `HF_TOKEN` and fails with exit 50 (`hub_auth`) unless the
+identity is the expected publisher, the token has write scope (a classic write token, or
+a fine-grained `repo.write` scope on the `SZLHOLDINGS` org or this Space), the user holds
+an `admin` or `write` role in `SZLHOLDINGS`, organization security restrictions are
+clear, and the exact Space resource-group ACL permits writing. The request expands
+`resourceGroup`; its id must match a `write`/`admin` membership, unless the user is
+an organization admin. The pinned SDK maps both omitted and null group metadata to
+`None`, so only that documented admin override can pass without group metadata.
+This is current authorization metadata, not a write attempt or a guarantee about
+future access. It never commits, and its JSON output carries only the identity
+name and booleans. It cannot be combined with `--bundle-dir`, `--verify-only`, or
+`--report`.
+
 From the `frontier-bench` repository root, after installing the pinned Hub client:
 
 ```bash
