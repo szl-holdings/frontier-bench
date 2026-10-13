@@ -73,3 +73,11 @@ fails closed and must be handled by the canonical publisher.
 The current chains contain only their BLOCKED genesis receipts: zero admitted measured
 rows. The evidence services can run with that dataset. Real benchmark execution and
 signed raw evidence remain the responsibility of the dedicated-node measurement producers.
+
+The canonical Actions publisher validates credential candidates before publication,
+trying the existing `HF_ORG_TOKEN` organization secret first and then `HF_TOKEN`.
+Only a candidate passing the same exact-target identity, token-scope, organization
+policy and resource-group checks is selected. Both publication and the scheduled
+canary receive that candidate; job outputs contain only its secret label. Missing
+or rejected candidates fail closed, including when the public bundle is unchanged.
+No token value is copied to logs, outputs, persistent files or other repositories.

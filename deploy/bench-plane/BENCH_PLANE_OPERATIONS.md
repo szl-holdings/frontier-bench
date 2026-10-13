@@ -375,3 +375,11 @@ That account check authenticates the writer; the repository and host allowlists
 bind publication to SZLHOLDINGS. `HF_TOKEN` must permit writes to that target.
 A namespace migration does not manufacture benchmark runs: receipt validation,
 compare-and-swap commits, byte readback, and `EMPTY_HONEST` remain enforced.
+
+The canonical Actions publisher validates credential candidates before publication,
+trying the existing `HF_ORG_TOKEN` organization secret first and then `HF_TOKEN`.
+Only a candidate passing the same exact-target identity, token-scope, organization
+policy and resource-group checks is selected. Both publication and the scheduled
+canary receive that candidate; job outputs contain only its secret label. Missing
+or rejected candidates fail closed, including when the public bundle is unchanged.
+No token value is copied to logs, outputs, persistent files or other repositories.

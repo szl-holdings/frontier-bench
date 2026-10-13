@@ -341,9 +341,50 @@ def run_credential_check(controller: ModuleType, use_cached_auth: bool) -> int:
     return int(report["exit_code"])
 
 
+def run_credential_selection(controller: ModuleType) -> int:
+    """Choose one admitted Actions credential; export its label, never its value."""
+    report: dict[str, Any] = {"schema_version": "szl-static-bench-credential-selection/v1",
+                              "target": TARGET, "remote_mutation": "NOT_ATTEMPTED",
+                              "state": "FAILED_CLOSED", "candidates": []}
+    selected = None
+    try:
+        output_path = os.environ.get("GITHUB_OUTPUT")
+        if not output_path:
+            raise controller.BenchError("hub_auth", "GITHUB_OUTPUT is required for credential selection", controller.EXIT_HUB_AUTH)
+        for name in ("HF_ORG_TOKEN", "HF_TOKEN"):
+            token = os.environ.get(f"CANDIDATE_{name}")
+            row: dict[str, Any] = {"secret": name, "present": bool(token), "verified": False}
+            report["candidates"].append(row)
+            if not token:
+                continue
+            try:
+                row["credential"] = check_write_credential(controller, token)
+            except controller.BenchError as exc:
+                row["failure"] = {"phase": exc.phase, "error": controller.redact(exc)}
+                continue
+            row["verified"] = True
+            selected = name
+            break
+        if selected is None:
+            raise controller.BenchError("hub_auth", "no candidate has verified write authorization for the target Space", controller.EXIT_HUB_AUTH)
+        # Both the publisher and the scheduled canary resolve the same selected
+        # label through Actions expressions. No token is written to job output.
+        with open(output_path, "a", encoding="utf-8") as output:
+            output.write(f"pick={selected}\n")
+        report.update(state="WRITE_CREDENTIAL_SELECTED", selected=selected, exit_code=0)
+    except (KeyboardInterrupt, SystemExit):
+        report.update(exit_code=controller.EXIT_INTERRUPTED, failure={"phase": "hub_auth", "error": "credential selection interrupted"})
+    except Exception as exc:
+        report.update(exit_code=getattr(exc, "exit_code", controller.EXIT_INTERNAL),
+                      failure={"phase": getattr(exc, "phase", "hub_auth"), "error": controller.redact(exc)})
+    print(json.dumps(controller.sanitize_for_report(report), sort_keys=True))
+    return int(report["exit_code"])
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle-dir", type=Path, help="directory exported by the reviewed controller audit (required unless --check-write-credential)")
+    parser.add_argument("--select-write-credential", action="store_true", help="validate Actions credential candidates and emit only the selected secret label")
     parser.add_argument("--check-write-credential", action="store_true", help="check HF_TOKEN authorization metadata for the Space using read-only calls; never publishes")
     parser.add_argument("--git-bin", help="optional absolute trusted Git executable path")
     parser.add_argument("--report", type=Path, help="new local JSON report path; defaults to .bench-plane-publish/<run-id>.json")
@@ -352,6 +393,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--provider-timeout", type=positive_timeout, default=600.0)
     parser.add_argument("--public-http-deadline", type=positive_timeout, default=180.0)
     args = parser.parse_args(argv)
+    if args.select_write_credential:
+        if args.check_write_credential or args.verify_only or args.bundle_dir or args.report or args.use_cached_auth:
+            parser.error("--select-write-credential cannot be combined with publication, cached authentication or credential-check arguments")
+        return run_credential_selection(load_controller())
     if args.check_write_credential:
         if args.verify_only or args.bundle_dir or args.report:
             parser.error("--check-write-credential cannot be combined with --verify-only, --bundle-dir, or --report")
