@@ -23,6 +23,8 @@ CONTROLLER_DIR = ROOT / "deploy" / "bench-plane"
 CONTROLLER_PATH = CONTROLLER_DIR / "finish_bench_plane.py"
 TARGET = "SZLHOLDINGS/szl-bench-suite"
 EXPECTED_USER = "betterwithage"
+TARGET_ORG = TARGET.split("/", 1)[0]
+ORG_WRITE_ROLES = {"admin", "write"}
 BUNDLE_FILES = {"README.md", "index.html", "results.json"}
 ALLOWED_LIVE_HOSTS = {"szlholdings-szl-bench-suite.hf.space", "szlholdings-szl-bench-suite.static.hf.space"}
 
@@ -211,9 +213,106 @@ def verify_anonymous_noop(controller: ModuleType, files: dict[str, bytes], run_r
     }
 
 
+def _token_can_write_target(access_token: Any) -> bool:
+    """True only for a classic write token or a fine-grained repo.write scope on the org or this Space."""
+    if not isinstance(access_token, dict):
+        return False
+    role = access_token.get("role")
+    if role == "write":
+        return True
+    if role != "fineGrained":
+        return False
+    fine_grained = access_token.get("fineGrained")
+    scoped = fine_grained.get("scoped") if isinstance(fine_grained, dict) else None
+    for entry in scoped if isinstance(scoped, list) else []:
+        entity = entry.get("entity") if isinstance(entry, dict) else None
+        permissions = entry.get("permissions") if isinstance(entry, dict) else None
+        if not isinstance(entity, dict) or not isinstance(permissions, list) or "repo.write" not in permissions:
+            continue
+        kind, name = str(entity.get("type", "")).lower(), str(entity.get("name", ""))
+        if (kind == "org" and name.lower() == TARGET_ORG.lower()) or (kind == "space" and name.lower() == TARGET.lower()):
+            return True
+    return False
+
+
+def check_write_credential(controller: ModuleType, token: str) -> dict[str, Any]:
+    """Prove the publication credential could write, without writing.
+
+    Read-only calls only (whoami, space_info). The result carries the identity
+    name and booleans, never the token or provider response bodies.
+    """
+    from huggingface_hub import HfApi
+
+    evidence: dict[str, Any] = {"identity": None, "identity_matches": False, "token_write_scope": False,
+                                "org_write_role": False, "space_visible": False}
+    api = HfApi(token=token)
+    try:
+        identity = api.whoami()
+    except Exception as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        raise controller.BenchError("hub_auth", f"Hugging Face rejected the write credential (HTTP {status or 'unknown'})",
+                                    controller.EXIT_HUB_AUTH, detail=evidence) from None
+    if not isinstance(identity, dict):
+        raise controller.BenchError("hub_auth", "Hugging Face returned an unreadable identity", controller.EXIT_HUB_AUTH, detail=evidence)
+    name = str(identity.get("name", ""))
+    evidence["identity"] = name
+    evidence["identity_matches"] = identity.get("type", "user") == "user" and name.lower() == EXPECTED_USER.lower()
+    auth = identity.get("auth")
+    evidence["token_write_scope"] = _token_can_write_target(auth.get("accessToken") if isinstance(auth, dict) else None)
+    orgs = identity.get("orgs")
+    evidence["org_write_role"] = any(
+        isinstance(org, dict) and str(org.get("name", "")).lower() == TARGET_ORG.lower()
+        and str(org.get("roleInOrg", "")).lower() in ORG_WRITE_ROLES
+        for org in (orgs if isinstance(orgs, list) else [])
+    )
+    if not evidence["identity_matches"]:
+        raise controller.BenchError("hub_auth", f"write credential belongs to {name!r}, expected {EXPECTED_USER!r}", controller.EXIT_HUB_AUTH, detail=evidence)
+    if not evidence["token_write_scope"]:
+        raise controller.BenchError("hub_auth", f"write credential lacks write scope for {TARGET}", controller.EXIT_HUB_AUTH, detail=evidence)
+    if not evidence["org_write_role"]:
+        raise controller.BenchError("hub_auth", f"{name!r} lacks an admin or write role in {TARGET_ORG}", controller.EXIT_HUB_AUTH, detail=evidence)
+    try:
+        info = api.space_info(repo_id=TARGET)
+    except Exception as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        raise controller.BenchError("hub_auth", f"write credential could not read {TARGET} (HTTP {status or 'unknown'})",
+                                    controller.EXIT_HUB_AUTH, detail=evidence) from None
+    evidence["space_visible"] = str(getattr(info, "id", "")).lower() == TARGET.lower()
+    if not evidence["space_visible"]:
+        raise controller.BenchError("hub_auth", "provider returned an unexpected Space identity", controller.EXIT_HUB_AUTH, detail=evidence)
+    return evidence
+
+
+def run_credential_check(controller: ModuleType, use_cached_auth: bool) -> int:
+    report: dict[str, Any] = {
+        "schema_version": "szl-static-bench-credential-check/v1", "mode": "CHECK_WRITE_CREDENTIAL",
+        "target": TARGET, "checked_at": controller.utc_now(), "remote_mutation": "NOT_ATTEMPTED",
+        "state": "IN_PROGRESS",
+    }
+    try:
+        token = os.environ.get("HF_TOKEN")
+        if not token and use_cached_auth:
+            from huggingface_hub import get_token
+            token = get_token()
+        if not token:
+            raise controller.BenchError("hub_auth", "HF_TOKEN is required for the write-credential check", controller.EXIT_HUB_AUTH)
+        report["credential"] = check_write_credential(controller, token)
+        token = None
+        report["state"], report["exit_code"] = "WRITE_CREDENTIAL_VERIFIED", 0
+    except BaseException as exc:
+        exit_code = controller.EXIT_INTERRUPTED if isinstance(exc, (KeyboardInterrupt, SystemExit)) else getattr(exc, "exit_code", controller.EXIT_INTERNAL)
+        report["state"], report["exit_code"] = "FAILED_CLOSED", exit_code
+        if isinstance(getattr(exc, "detail", None), dict):
+            report["credential"] = exc.detail
+        report["failure"] = {"phase": getattr(exc, "phase", "hub_auth"), "error": controller.redact(exc)}
+    print(json.dumps(controller.sanitize_for_report(report), sort_keys=True))
+    return int(report["exit_code"])
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--bundle-dir", type=Path, required=True, help="directory exported by the reviewed controller audit")
+    parser.add_argument("--bundle-dir", type=Path, help="directory exported by the reviewed controller audit (required unless --check-write-credential)")
+    parser.add_argument("--check-write-credential", action="store_true", help="prove HF_TOKEN is a live write credential for the Space using read-only calls; never publishes")
     parser.add_argument("--git-bin", help="optional absolute trusted Git executable path")
     parser.add_argument("--report", type=Path, help="new local JSON report path; defaults to .bench-plane-publish/<run-id>.json")
     parser.add_argument("--verify-only", action="store_true", help="verify the existing public bundle anonymously; never resolve write credentials or modify the Space")
@@ -221,6 +320,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--provider-timeout", type=positive_timeout, default=600.0)
     parser.add_argument("--public-http-deadline", type=positive_timeout, default=180.0)
     args = parser.parse_args(argv)
+    if args.check_write_credential:
+        if args.verify_only or args.bundle_dir or args.report:
+            parser.error("--check-write-credential cannot be combined with --verify-only, --bundle-dir, or --report")
+        return run_credential_check(load_controller(), args.use_cached_auth)
+    if args.bundle_dir is None:
+        parser.error("--bundle-dir is required")
     controller = load_controller()
     run_id = controller.utc_now().replace(":", "").replace("-", "") + "-" + secrets.token_hex(4)
     report_path = Path(os.path.abspath((args.report or Path.cwd() / ".bench-plane-publish" / f"{run_id}.json").expanduser()))
