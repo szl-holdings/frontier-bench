@@ -34,7 +34,9 @@ success-printing shell wrapper. It:
    interruptions, and reports incomplete restoration as a distinct failure;
 11. for a published run, authenticates the exact Hugging Face user, conditionally commits changed files among
    `README.md`, `index.html`, `results.json`, and the digest-pinned SZL design-system
-   assets under `szl/` with a parent-commit precondition,
+   assets under `szl/` with a parent-commit precondition, deletes retired files that the
+   reviewed surface no longer serves (`SPACE_RETIRED_FILES`, currently the provider's
+   template `style.css`) and requires their absence at the immutable commit,
    reads every managed file back at the immutable commit, waits for the Space to report
    `RUNNING`, verifies the public bytes (including every `szl/` asset, served by the
    Space host itself without a redirect) between two stable head/runtime observations, and

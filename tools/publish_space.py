@@ -146,8 +146,9 @@ def positive_timeout(value: str) -> float:
 def verify_anonymous_noop(controller: ModuleType, files: dict[str, bytes], run_root: Path) -> dict[str, Any] | None:
     """Witness an already-identical public deployment using explicit anonymous reads.
 
-    None means authentication is needed for a changed bundle or runtime. This
-    function has no commit, upload, restart, or other mutation path.
+    None means authentication is needed for a changed bundle or runtime, or to
+    delete a retired file that is still present. This function has no commit,
+    upload, delete, restart, or other mutation path.
     """
     from huggingface_hub import HfApi
 
@@ -162,6 +163,9 @@ def verify_anonymous_noop(controller: ModuleType, files: dict[str, bytes], run_r
         return None
     remote_files = set(api.list_repo_files(repo_id=TARGET, repo_type="space", revision=before_sha))
     if not set(files).issubset(remote_files):
+        return None
+    if remote_files & set(controller.SPACE_RETIRED_FILES):
+        # A retired file is still served; only the authenticated controller can delete it.
         return None
     download_root = controller.ensure_private_directory(run_root / "anonymous-downloads", phase="anonymous_witness", exit_code=controller.EXIT_PROVIDER)
     hashes: dict[str, str] = {}
