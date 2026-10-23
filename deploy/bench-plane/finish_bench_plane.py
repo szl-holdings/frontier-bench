@@ -37,6 +37,7 @@ import dataclasses
 import datetime as dt
 import hashlib
 import hmac
+import html
 import inspect
 import io
 import json
@@ -2130,7 +2131,7 @@ def _space_sdk(info: Any) -> str | None:
     return getattr(card, "sdk", None) if card is not None else None
 
 
-def validate_static_space_readme(data: bytes) -> None:
+def validate_static_space_readme(data: bytes) -> dict[str, str]:
     if not hmac.compare_digest(sha256_bytes(data), SPACE_README_SHA256):
         raise BenchError("hub_auth", "Space README does not match the reviewed asset digest", EXIT_HUB_AUTH)
     try:
@@ -2153,6 +2154,7 @@ def validate_static_space_readme(data: bytes) -> None:
         raise BenchError("hub_auth", "Space README front matter must declare sdk: static", EXIT_HUB_AUTH)
     if fields.get("app_file") != "index.html":
         raise BenchError("hub_auth", "Space README front matter must declare app_file: index.html", EXIT_HUB_AUTH)
+    return fields
 
 
 def validate_space_index_template(data: bytes) -> None:
@@ -2399,10 +2401,15 @@ def verify_live_static_index(
     expected: bytes,
     observed: bytes,
     *,
+    reviewed_readme: bytes | None = None,
     phase: str = "public_runtime",
     exit_code: int = EXIT_PROVIDER,
 ) -> dict[str, str | None]:
-    """Verify exact bytes or the one reviewed Hugging Face static transform."""
+    """Verify exact bytes or narrowly reconstructed static-provider additions.
+
+    Social-preview values come only from the hash-pinned publication card and
+    exact Space ID. The creator-script bound and all original bytes stay fixed.
+    """
     expected_sha256 = sha256_bytes(expected)
     observed_sha256 = sha256_bytes(observed)
     if hmac.compare_digest(expected, observed):
@@ -2416,14 +2423,35 @@ def verify_live_static_index(
     marker = b"<head>"
     if expected.count(marker) != 1:
         raise BenchError(phase, "reviewed index must contain exactly one literal <head> marker", exit_code)
+    social_metadata = b""
+    candidate = observed
+    if reviewed_readme is not None:
+        fields = validate_static_space_readme(reviewed_readme)
+        image_url = f"https://cdn-thumbnails.huggingface.co/social-thumbnails/spaces/{SPACE_ID}.png"
+        reviewed_social = (
+            f'<meta property="og:title" content="{html.escape(fields["title"], quote=True)}">'
+            f'<meta property="og:description" content="{html.escape(fields["short_description"], quote=True)}">'
+            f'<meta property="og:image" content="{image_url}">'
+            '<meta name="twitter:card" content="summary_large_image">'
+            f'<meta name="twitter:image" content="{image_url}">'
+        ).encode("utf-8")
+        # Remove only one exact block, at its observed provider insertion point.
+        # The full reconstruction below rejects relocation or any other edits.
+        if expected.count(b"</head>") != 1 or observed.count(b"</head>") != 1:
+            raise BenchError(phase, "static-provider metadata requires exactly one closing head marker", exit_code)
+        head_end = observed.index(b"</head>")
+        social_start = head_end - len(reviewed_social)
+        if social_start >= 0 and hmac.compare_digest(observed[social_start:head_end], reviewed_social):
+            social_metadata = reviewed_social
+            candidate = observed[:social_start] + observed[head_end:]
     insertion_offset = expected.index(marker) + len(marker)
-    insertion_size = len(observed) - len(expected)
+    insertion_size = len(candidate) - len(expected)
     if not 0 < insertion_size <= MAX_HF_STATIC_INDEX_INJECTION_BYTES:
         raise BenchError(phase, "public index differs outside the bounded static-provider transform", exit_code)
-    injection = observed[insertion_offset:insertion_offset + insertion_size]
+    injection = candidate[insertion_offset:insertion_offset + insertion_size]
     if (
-        not hmac.compare_digest(observed[:insertion_offset], expected[:insertion_offset])
-        or not hmac.compare_digest(observed[insertion_offset + insertion_size:], expected[insertion_offset:])
+        not hmac.compare_digest(candidate[:insertion_offset], expected[:insertion_offset])
+        or not hmac.compare_digest(candidate[insertion_offset + insertion_size:], expected[insertion_offset:])
         or not injection.startswith(HF_STATIC_INDEX_INJECTION_PREFIX)
         or not injection.endswith(HF_STATIC_INDEX_INJECTION_SUFFIX)
     ):
@@ -2443,13 +2471,15 @@ def verify_live_static_index(
     if variables != {"SPACE_CREATOR_USER_ID": HF_STATIC_CREATOR_USER_ID}:
         raise BenchError(phase, "public index contains unreviewed static-provider variables", exit_code)
     reconstructed = expected[:insertion_offset] + injection + expected[insertion_offset:]
+    if social_metadata:
+        reconstructed = reconstructed.replace(b"</head>", social_metadata + b"</head>", 1)
     if not hmac.compare_digest(reconstructed, observed):
         raise BenchError(phase, "public index normalization did not preserve all observed bytes", exit_code)
     return {
-        "transform": "HF_STATIC_CREATOR_METADATA_V1",
+        "transform": "STATIC_PROVIDER_CREATOR_AND_SOCIAL_METADATA_V2" if social_metadata else "HF_STATIC_CREATOR_METADATA_V1",
         "raw_sha256": observed_sha256,
         "normalized_sha256": expected_sha256,
-        "injection_sha256": sha256_bytes(injection),
+        "injection_sha256": sha256_bytes(injection + social_metadata),
     }
 
 
@@ -2705,7 +2735,7 @@ def publish_and_witness(
                 if not hmac.compare_digest(sha256_bytes(public_bytes), sha256_bytes(payload_bytes)):
                     raise BenchError("public_runtime", "public results payload digest mismatch", EXIT_PROVIDER)
                 require_live_revision_header(results_headers, commit_sha)
-                public_index_evidence = verify_live_static_index(index_bytes, public_index)
+                public_index_evidence = verify_live_static_index(index_bytes, public_index, reviewed_readme=desired["README.md"])
                 public_asset_hashes = verify_public_static_assets(SPACE_URL, commit_sha, static_assets)
                 break
             except BenchError as exc:
