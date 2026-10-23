@@ -382,7 +382,7 @@ class AnonymousWitnessTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.files = {
-            "README.md": b"readme fixture",
+            "README.md": (publisher.CONTROLLER_DIR / "szl-bench-suite.README.md").read_bytes(),
             "index.html": b"<!doctype html><html><head></head><body>index fixture</body></html>",
             "results.json": b"{}",
             **{name: f"asset fixture {name}".encode() for name in controller.SPACE_STATIC_ASSETS},
@@ -457,6 +457,26 @@ class AnonymousWitnessTests(unittest.TestCase):
         public_index = self.files["index.html"].replace(b"<head>", b"<head>" + injection, 1)
         with self.assertRaisesRegex(controller.BenchError, "unreviewed static-provider variables"):
             self.invoke(public={**self.files, "index.html": public_index})
+
+    def test_observed_social_preview_metadata_is_noop_verified(self) -> None:
+        creator = (
+            b'<script>window.huggingface={variables:{"SPACE_CREATOR_USER_ID":"69ec7d565e5561c3b16baba8"}};</script>'
+        )
+        social = (
+            b'<meta property="og:title" content="SZL Bench Suite">'
+            b'<meta property="og:description" content="Receipt-gated engine, retrieval, and quantization evidence">'
+            b'<meta property="og:image" content="https://cdn-thumbnails.huggingface.co/social-thumbnails/spaces/SZLHOLDINGS/szl-bench-suite.png">'
+            b'<meta name="twitter:card" content="summary_large_image">'
+            b'<meta name="twitter:image" content="https://cdn-thumbnails.huggingface.co/social-thumbnails/spaces/SZLHOLDINGS/szl-bench-suite.png">'
+        )
+        public_index = self.files["index.html"].replace(b"<head>", b"<head>" + creator, 1).replace(
+            b"</head>", social + b"</head>", 1
+        )
+        outcome = self.invoke(public={**self.files, "index.html": public_index})
+        self.assertEqual(outcome["public_index_transform"], "STATIC_PROVIDER_CREATOR_AND_SOCIAL_METADATA_V2")
+        self.assertEqual(outcome["public_index_normalized_sha256"], controller.sha256_bytes(self.files["index.html"]))
+        self.assertFalse(outcome["changed"])
+        self.assertFalse(outcome["authenticated_write"])
 
     def test_changed_immutable_bundle_requires_authentication_without_writing(self) -> None:
         self.assertIsNone(self.invoke(remote={**self.files, "README.md": b"different"}))

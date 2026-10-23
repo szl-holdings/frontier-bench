@@ -186,7 +186,7 @@ def verify_anonymous_noop(controller: ModuleType, files: dict[str, bytes], run_r
             raise controller.BenchError("anonymous_witness", "public index has the wrong content type", controller.EXIT_PROVIDER)
         if name == "index.html":
             public_index_evidence = controller.verify_live_static_index(
-                files[name], observed, phase="anonymous_witness"
+                files[name], observed, reviewed_readme=files["README.md"], phase="anonymous_witness"
             )
         else:
             controller.require_live_revision_header(headers, before_sha, phase="anonymous_witness")

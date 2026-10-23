@@ -887,6 +887,16 @@ class StaticIndexWitnessTests(unittest.TestCase):
             + bench.canonical_json_bytes({"SPACE_CREATOR_USER_ID": bench.HF_STATIC_CREATOR_USER_ID})
             + bench.HF_STATIC_INDEX_INJECTION_SUFFIX
         )
+        self.reviewed_readme = (HERE / "szl-bench-suite.README.md").read_bytes()
+        # Observed on the public static host on 2026-10-23. Keep this fixture
+        # independent of the verifier's reconstruction of the reviewed card.
+        self.social_metadata = (
+            b'<meta property="og:title" content="SZL Bench Suite">'
+            b'<meta property="og:description" content="Receipt-gated engine, retrieval, and quantization evidence">'
+            b'<meta property="og:image" content="https://cdn-thumbnails.huggingface.co/social-thumbnails/spaces/SZLHOLDINGS/szl-bench-suite.png">'
+            b'<meta name="twitter:card" content="summary_large_image">'
+            b'<meta name="twitter:image" content="https://cdn-thumbnails.huggingface.co/social-thumbnails/spaces/SZLHOLDINGS/szl-bench-suite.png">'
+        )
 
     def inject(self, insertion: bytes, *, expected: bytes | None = None) -> bytes:
         source = self.expected if expected is None else expected
@@ -928,6 +938,45 @@ class StaticIndexWitnessTests(unittest.TestCase):
         for observed in cases:
             with self.subTest(observed=observed[:120]), self.assertRaises(bench.BenchError):
                 bench.verify_live_static_index(self.expected, observed)
+
+    def test_observed_creator_and_social_metadata_preserve_every_original_byte(self) -> None:
+        observed = self.inject(self.valid_injection).replace(b"</head>", self.social_metadata + b"</head>", 1)
+        self.assertEqual(len(observed) - len(self.expected), 573)
+        evidence = bench.verify_live_static_index(self.expected, observed, reviewed_readme=self.reviewed_readme)
+        self.assertEqual(evidence["transform"], "STATIC_PROVIDER_CREATOR_AND_SOCIAL_METADATA_V2")
+        self.assertEqual(evidence["raw_sha256"], bench.sha256_bytes(observed))
+        self.assertEqual(evidence["normalized_sha256"], bench.sha256_bytes(self.expected))
+        self.assertEqual(evidence["injection_sha256"], bench.sha256_bytes(self.valid_injection + self.social_metadata))
+
+    def test_social_metadata_requires_the_reviewed_card(self) -> None:
+        observed = self.inject(self.valid_injection).replace(b"</head>", self.social_metadata + b"</head>", 1)
+        for readme in (None, self.reviewed_readme.replace(b"SZL Bench Suite", b"Different title", 1)):
+            with self.subTest(readme=readme is None), self.assertRaises(bench.BenchError):
+                bench.verify_live_static_index(self.expected, observed, reviewed_readme=readme)
+
+    def test_social_metadata_does_not_allow_other_page_changes(self) -> None:
+        valid = self.inject(self.valid_injection).replace(b"</head>", self.social_metadata + b"</head>", 1)
+        title_tag = b'<meta property="og:title" content="SZL Bench Suite">'
+        cases = (
+            valid.replace(b"SZL Bench Suite", b"Unreviewed title"),
+            valid.replace(b"quantization evidence", b"certified performance"),
+            valid.replace(b"cdn-thumbnails.huggingface.co", b"attacker.example"),
+            valid.replace(b"og:title", b"arbitrary:tag"),
+            valid.replace(b'property="og:title"', b'name="og:title"'),
+            valid.replace(self.social_metadata, self.social_metadata.replace(title_tag, b"", 1) + title_tag),
+            valid.replace(b"</head>", b'<meta name="extra" content="unreviewed"></head>'),
+            valid.replace(b"</head>", b"<script>evil()</script></head>"),
+            valid.replace(b"</head>", self.social_metadata + b"</head>"),
+            valid.replace(b"<body>verified", b"<body>changed"),
+            valid.replace(b"<body>", b"<body>" + self.valid_injection),
+            valid.replace(bench.HF_STATIC_CREATOR_USER_ID.encode(), b"000000000000000000000000"),
+            valid.replace(b"</head>", b"</head></head>"),
+            self.inject(self.valid_injection + self.social_metadata),
+            self.expected.replace(b"</head>", self.social_metadata + b"</head>"),
+        )
+        for observed in cases:
+            with self.subTest(observed=observed[:120]), self.assertRaises(bench.BenchError):
+                bench.verify_live_static_index(self.expected, observed, reviewed_readme=self.reviewed_readme)
 
     def test_revision_header_is_required_exactly_once(self) -> None:
         revision = "a" * 40
