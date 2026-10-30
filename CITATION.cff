@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use this software, cite this repository. No DOI has been deposited for it."
+title: "Frontier Bench"
+type: software
+authors:
+  - family-names: Lutar
+    given-names: Stephen P.
+    orcid: "https://orcid.org/0009-0001-0110-4173"
+    affiliation: "SZL Holdings"
+license: Apache-2.0
+repository-code: "https://github.com/szl-holdings/frontier-bench"
+url: "https://github.com/szl-holdings/frontier-bench"
+abstract: "Receipt-gated benchmark harness. Public state is EMPTY_HONEST. Genesis receipts are BLOCKED. Admitted measured rows are zero. This repository makes no performance claim."

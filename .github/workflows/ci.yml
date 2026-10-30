@@ -18,6 +18,8 @@ jobs:
       - run: python tests/test_verifier.py
       - run: python tests/test_metrics.py
       - run: python tests/test_client.py
+      - name: Citation, pin, receipt, and claim guards
+        run: python tests/test_citation_and_guards.py
       - name: Test the bench-plane controller
         run: python -I -B deploy/bench-plane/test_finish_bench_plane.py
       - name: End-to-end run against live mock server
@@ -63,3 +65,18 @@ jobs:
           path: runtime-smoke-evidence.json
           if-no-files-found: error
           retention-days: 30
+  honesty:
+    name: Immutable pin, citation, receipt state, and reproducible manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Exact-head readback and guard suite
+        env:
+          SZL_EXACT_HEAD_READBACK: "1"
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python tests/test_citation_and_guards.py

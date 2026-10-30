@@ -1,0 +1,12 @@
+{
+  "repository": "szl-holdings/szl-brand",
+  "previous": "4309f6fce89179331b0b3ed8c99494e76c5be256",
+  "commit": "06ccb7c4858de138932156db2fd1e0d540f883e0",
+  "ahead_by": 22,
+  "behind_by": 0,
+  "icon_path": "kit/logos/orbit-v2/suite/szl-icon-32.svg",
+  "icon_git_blob": "a6d0c6392df309ab69f6ee063ec094b4089b3d9b",
+  "icon_sha256": "6e2b7d72a3af3d9602b79de41df0194ede6496a9661f057108ec224c0efc92e6",
+  "icon_unchanged": true,
+  "verified_at": "2026-10-30T11:31:59Z"
+}
