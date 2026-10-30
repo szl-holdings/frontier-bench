@@ -1,0 +1,6 @@
+{
+  "public_state": "EMPTY_HONEST",
+  "genesis_file": "receipts/000-genesis.json",
+  "genesis_status": "BLOCKED",
+  "admitted_measured_rows": 0
+}

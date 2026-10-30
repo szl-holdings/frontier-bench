@@ -8,6 +8,7 @@
 *.md text eol=lf
 *.py text eol=lf
 *.yml text eol=lf
+*.cff text eol=lf
 *.mjs text eol=lf
 deploy/bench-plane/* text eol=lf
 deploy/bench-plane/szl/** -text
