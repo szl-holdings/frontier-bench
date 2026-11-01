@@ -276,5 +276,69 @@ def test_explicit_usage_array_preserves_counts(self):
     self.assertEqual(result.prompt_tokens, 3)
 StreamProtocolTests.test_explicit_usage_array_preserves_counts = test_explicit_usage_array_preserves_counts
 
+class UsageTokenAdmissionTests(unittest.TestCase):
+    def request(self, usage_payload, stream=True, prefix=()):
+        # Every transport response is synthetic; no engine is contacted.
+        response = _Response(
+            lines=list(prefix) + [text(), event({"choices": [], **usage_payload}), DONE],
+            body=json.dumps({"choices": [{"message": {"content": "hello"}}], **usage_payload}).encode(),
+        )
+        with patch("harness.client.urllib.request.urlopen", return_value=response):
+            return chat_completion("http://synthetic.invalid", "fixture", "fixture", stream=stream)
+
+    def test_invalid_counts_return_empty_failed_samples(self):
+        for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            for value in (True, False, -1, 1.5, "2", [], {}, float("inf"), float("nan")):
+                for stream in (False, True):
+                    with self.subTest(field=field, value=value, stream=stream):
+                        result = self.request({"usage": {field: value}}, stream)
+                        self.assertFalse(result.ok)
+                        self.assertIn(field + " must be a non-negative integer or null", result.error)
+                        self.assertEqual(result.text, "")
+                        self.assertIsNone(result.ttft_s)
+                        self.assertIsNone(result.total_s)
+                        self.assertIsNone(result.prompt_tokens)
+                        self.assertIsNone(result.completion_tokens)
+
+    def test_invalid_earlier_usage_cannot_be_replaced_by_valid_final_usage(self):
+        result = self.request({"usage": {"completion_tokens": 1}}, prefix=[
+            event({"choices": [], "usage": {"completion_tokens": -1}}),
+        ])
+        self.assertFalse(result.ok)
+        self.assertEqual(result.text, "")
+        self.assertIsNone(result.completion_tokens)
+
+    def test_optional_usage_and_valid_integer_counts_remain_compatible(self):
+        for payload in ({}, {"usage": None}, {"usage": {}},
+                        {"usage": {"prompt_tokens": None, "completion_tokens": None, "total_tokens": None}},
+                        {"usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}},
+                        {"usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}}):
+            for stream in (False, True):
+                with self.subTest(payload=payload, stream=stream):
+                    result = self.request(payload, stream)
+                    self.assertTrue(result.ok, result.error)
+                    expected = payload.get("usage") or {}
+                    self.assertEqual(result.prompt_tokens, expected.get("prompt_tokens"))
+                    self.assertEqual(result.completion_tokens, expected.get("completion_tokens"))
+
+    def test_runner_retains_valid_sample_after_malformed_usage(self):
+        from harness.runner import run_engine
+        from unittest.mock import Mock
+        spec = Mock()
+        spec.resolve_endpoint.return_value = "http://synthetic.invalid"
+        invalid = _Response(lines=[text(), event({"choices": [], "usage": {"completion_tokens": True}}), DONE])
+        valid = _Response(lines=[text(), event({"choices": [], "usage": {"completion_tokens": 2}}), DONE])
+        with patch("harness.runner.health_check", return_value=True), patch(
+            "harness.client.urllib.request.urlopen", side_effect=[invalid, valid]
+        ), patch("harness.client.time.perf_counter", side_effect=iter(range(20))):
+            result = run_engine("fixture", spec, ["prompt"], "fixture", 2, 8)
+        self.assertEqual(result["status"], "MEASURED")
+        self.assertEqual(result["summary"]["n_requests"], 2)
+        self.assertEqual(result["summary"]["n_success"], 1)
+        self.assertEqual(result["summary"]["n_failed"], 1)
+        self.assertEqual(len(result["summary"]["errors"]), 1)
+        self.assertIn("completion_tokens", result["summary"]["errors"][0])
+        self.assertIsNotNone(result["summary"]["p50_total_ms"])
+
 if __name__ == '__main__':
     unittest.main()

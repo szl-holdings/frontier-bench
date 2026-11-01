@@ -23,6 +23,19 @@ class GenerationResult:
     status_code: Optional[int] = None
 
 
+def _validated_usage(value):
+    """Validate each usage event before it can enter or replace sample metadata."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("usage must be an object")
+    for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        count = value.get(field)
+        if count is not None and (type(count) is not int or count < 0):
+            raise ValueError(field + " must be a non-negative integer or null")
+    return value
+
+
 def chat_completion(base_url: str, model: str, prompt: str, max_tokens: int = 128,
                      temperature: float = 0.0, timeout: float = 60.0,
                      stream: bool = True) -> GenerationResult:
@@ -87,9 +100,7 @@ def chat_completion(base_url: str, model: str, prompt: str, max_tokens: int = 12
                             ttft = time.perf_counter() - t_start
                         text_chunks.append(content)
                     if obj.get("usage") is not None:
-                        if not isinstance(obj["usage"], dict):
-                            raise ValueError("usage must be an object")
-                        usage = obj["usage"]
+                        usage = _validated_usage(obj["usage"])
                 if not saw_done:
                     raise ValueError("stream ended before the [DONE] event")
             else:
@@ -97,10 +108,7 @@ def chat_completion(base_url: str, model: str, prompt: str, max_tokens: int = 12
                 content = body["choices"][0]["message"]["content"]
                 if isinstance(content, str) and content:
                     text_chunks.append(content)
-                received_usage = body.get("usage")
-                if received_usage is not None and not isinstance(received_usage, dict):
-                    raise ValueError("usage must be an object")
-                usage = received_usage if received_usage is not None else {}
+                usage = _validated_usage(body.get("usage"))
     except urllib.error.HTTPError as e:
         return GenerationResult(ok=False, error=str(e), status_code=e.code)
     except urllib.error.URLError as e:
