@@ -62,7 +62,7 @@ def chat_completion(base_url: str, model: str, prompt: str, max_tokens: int = 12
                         raise ValueError("stream JSON data must be an object")
                     if "error" in obj:
                         raise ValueError("stream contained a provider error")
-                    choices = obj.get("choices", [])
+                    choices = obj.get("choices")
                     if not isinstance(choices, list):
                         raise ValueError("choices must be an array")
                     # A valid usage-only SSE chunk has an empty choices array.
@@ -70,14 +70,14 @@ def chat_completion(base_url: str, model: str, prompt: str, max_tokens: int = 12
                     for choice in choices:
                         if not isinstance(choice, dict):
                             raise ValueError("stream choice must be an object")
-                        delta = choice.get("delta", {})
+                        delta = choice.get("delta")
                         if not isinstance(delta, dict):
                             raise ValueError("stream delta must be an object")
                         content = delta.get("content")
                         # OpenAI role/finish metadata may omit content or use null.
                         if content is not None and not isinstance(content, str):
                             raise ValueError("stream content must be a string or null")
-                    delta = choices[0].get("delta", {}) if choices else {}
+                    delta = choices[0]["delta"] if choices else {}
                     content = delta.get("content")
                     if isinstance(content, str) and content:
                         # Metadata-only SSE events (for example, the initial

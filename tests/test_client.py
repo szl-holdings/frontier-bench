@@ -250,5 +250,31 @@ for name, value in [('null', None), ('list', []), ('number', 17), ('bool', False
 for name, value in [('list', ['bad']), ('dict', {'bad': 1}), ('number', 17), ('bool', True)]:
     install_case('content_' + name, {'choices': [{'delta': {'content': value}}]}, 'content must be a string or null')
 install_case('invalid_second_choice', {'choices': [{'delta': {}}, 17]}, 'choice must be an object')
+
+# Missing members differ from present empty metadata containers.
+def install_missing_member_case(name, payload, error):
+    for position in ("before", "after"):
+        def case(self, payload=payload, error=error, position=position):
+            chunks = [event(payload), text()] if position == "before" else [text(), event(payload)]
+            self.check_stream(chunks + [DONE], error)
+        setattr(StreamProtocolTests, "test_missing_" + name + "_" + position, case)
+
+install_missing_member_case("choices_empty_object", {}, "choices must be an array")
+install_missing_member_case("choices_usage_object", {"usage": {"completion_tokens": 1}}, "choices must be an array")
+install_missing_member_case("delta_empty_choice", {"choices": [{}]}, "delta must be an object")
+install_missing_member_case("delta_index_only", {"choices": [{"index": 0}]}, "delta must be an object")
+install_missing_member_case("delta_finish_only", {"choices": [{"index": 0, "finish_reason": "stop"}]}, "delta must be an object")
+install_missing_member_case("delta_second_choice", {"choices": [{"delta": {}}, {"index": 1}]}, "delta must be an object")
+
+def test_explicit_empty_delta_finish_remains_valid(self):
+    self.check_stream([text(), event({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}), DONE])
+StreamProtocolTests.test_explicit_empty_delta_finish_remains_valid = test_explicit_empty_delta_finish_remains_valid
+
+def test_explicit_usage_array_preserves_counts(self):
+    result = self.check_stream([text(), event({"choices": [], "usage": {"completion_tokens": 2, "prompt_tokens": 3}}), DONE])
+    self.assertEqual(result.completion_tokens, 2)
+    self.assertEqual(result.prompt_tokens, 3)
+StreamProtocolTests.test_explicit_usage_array_preserves_counts = test_explicit_usage_array_preserves_counts
+
 if __name__ == '__main__':
     unittest.main()
