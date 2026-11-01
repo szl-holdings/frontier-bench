@@ -127,7 +127,7 @@ class UsageOnlyEventTests(unittest.TestCase):
             with self.subTest(usage_first=usage_first):
                 usage = _event({"choices": [], "usage": {"completion_tokens": 1}})
                 text = _event({"choices": [{"delta": {"content": "hello"}}]})
-                response = _Response(lines=([usage, text] if usage_first else [text, usage]))
+                response = _Response(lines=([usage, text] if usage_first else [text, usage]) + [b"data: [DONE]\n\n"])
                 with patch("harness.client.urllib.request.urlopen", return_value=response), patch(
                     "harness.client.time.perf_counter", side_effect=[10.0, 10.4, 10.9]
                 ):
@@ -138,7 +138,7 @@ class UsageOnlyEventTests(unittest.TestCase):
                 self.assertEqual(result.completion_tokens, 1)
 
     def test_usage_only_empty_choices_never_prove_generated_text(self):
-        response = _Response(lines=[_event({"choices": [], "usage": {"completion_tokens": 9}})])
+        response = _Response(lines=[_event({"choices": [], "usage": {"completion_tokens": 9}}), b"data: [DONE]\n\n"])
         with patch("harness.client.urllib.request.urlopen", return_value=response):
             result = chat_completion("http://engine.invalid", "model", "prompt")
         self.assertFalse(result.ok)
@@ -159,12 +159,96 @@ class UsageOnlyEventTests(unittest.TestCase):
                     self.assertIn("usage must be an object", result.error)
 
     def test_null_usage_is_optional_metadata(self):
-        response = _Response(lines=[_event({"choices": [{"delta": {"content": "hello"}}], "usage": None})])
+        response = _Response(lines=[_event({"choices": [{"delta": {"content": "hello"}}], "usage": None}), b"data: [DONE]\n\n"])
         with patch("harness.client.urllib.request.urlopen", return_value=response):
             result = chat_completion("http://engine.invalid", "model", "prompt")
         self.assertTrue(result.ok)
         self.assertIsNone(result.completion_tokens)
 
 
-if __name__ == "__main__":
+# Offline protocol admission regressions. No engine or model is contacted.
+DONE = b'data: [DONE]\n\n'
+
+def event(value):
+    return ('data: ' + json.dumps(value) + '\n\n').encode()
+
+def text(value='hello'):
+    return event({'choices': [{'delta': {'content': value}}]})
+
+class Response:
+
+    def __init__(self, lines):
+        self.lines = lines
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def __iter__(self):
+        return iter(self.lines)
+
+class StreamProtocolTests(unittest.TestCase):
+
+    def check_stream(self, lines, expected_error=None):
+        with patch('harness.client.urllib.request.urlopen', return_value=Response(lines)):
+            result = chat_completion('http://synthetic.invalid', 'fixture', 'fixture')
+        if expected_error:
+            self.assertFalse(result.ok)
+            self.assertIn(expected_error, result.error)
+            self.assertEqual(result.text, '')
+            self.assertIsNone(result.ttft_s)
+        else:
+            self.assertTrue(result.ok, result.error)
+            self.assertEqual(result.text, 'hello')
+        return result
+
+    def test_complete_text(self):
+        self.check_stream([text(), DONE])
+
+    def test_text_then_eof(self):
+        self.check_stream([text()], 'before the [DONE]')
+
+    def test_empty_eof(self):
+        self.check_stream([], 'before the [DONE]')
+
+    def test_invalid_json_after_text(self):
+        self.check_stream([text(), b'data: {bad}\n', DONE], 'invalid JSON')
+
+    def test_provider_error_after_text(self):
+        self.check_stream([text(), event({'error': {'message': 'private'}}), DONE], 'provider error')
+
+    def test_usage_and_nullable_role(self):
+        self.check_stream([event({'choices': [{'delta': {'role': 'assistant', 'content': None}}]}), text(), event({'choices': [], 'usage': {'completion_tokens': 1}}), DONE])
+
+    def test_empty_completed_stream_is_not_success(self):
+        self.check_stream([DONE], 'no generated text')
+
+    def test_utf8_error_rejects(self):
+        self.check_stream([text(), b'data: \xff\n', DONE], 'UnicodeDecodeError')
+
+    def test_comments_remain_allowed(self):
+        self.check_stream([b': keepalive\n', text(), DONE])
+
+    def test_empty_string_is_not_a_text_event(self):
+        self.check_stream([text(''), text(), DONE])
+
+def install_case(name, payload, error):
+
+    def case(self):
+        self.check_stream([text(), event(payload), DONE], error)
+    setattr(StreamProtocolTests, 'test_' + name, case)
+for name, value in [('null', None), ('list', []), ('number', 17), ('bool', True), ('string', 'bad')]:
+    install_case('object_' + name, value, 'must be an object')
+for name, value in [('null', None), ('dict', {}), ('number', 17), ('bool', False), ('string', 'bad')]:
+    install_case('choices_' + name, {'choices': value}, 'choices must be an array')
+for name, value in [('null', None), ('list', []), ('number', 17), ('bool', False), ('string', 'bad')]:
+    install_case('choice_' + name, {'choices': [value]}, 'choice must be an object')
+for name, value in [('null', None), ('list', []), ('number', 17), ('bool', False), ('string', 'bad')]:
+    install_case('delta_' + name, {'choices': [{'delta': value}]}, 'delta must be an object')
+for name, value in [('list', ['bad']), ('dict', {'bad': 1}), ('number', 17), ('bool', True)]:
+    install_case('content_' + name, {'choices': [{'delta': {'content': value}}]}, 'content must be a string or null')
+install_case('invalid_second_choice', {'choices': [{'delta': {}}, 17]}, 'choice must be an object')
+if __name__ == '__main__':
     unittest.main()

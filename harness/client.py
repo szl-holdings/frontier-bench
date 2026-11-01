@@ -45,22 +45,38 @@ def chat_completion(base_url: str, model: str, prompt: str, max_tokens: int = 12
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             if stream:
+                saw_done = False
                 for raw_line in resp:
                     line = raw_line.decode("utf-8").strip()
                     if not line or not line.startswith("data:"):
                         continue
                     chunk = line[len("data:"):].strip()
                     if chunk == "[DONE]":
+                        saw_done = True
                         break
                     try:
                         obj = json.loads(chunk)
-                    except json.JSONDecodeError:
-                        continue
+                    except json.JSONDecodeError as exc:
+                        raise ValueError("stream contained invalid JSON data") from exc
+                    if not isinstance(obj, dict):
+                        raise ValueError("stream JSON data must be an object")
+                    if "error" in obj:
+                        raise ValueError("stream contained a provider error")
                     choices = obj.get("choices", [])
                     if not isinstance(choices, list):
                         raise ValueError("choices must be an array")
                     # A valid usage-only SSE chunk has an empty choices array.
                     # It must preserve usage without fabricating text or TTFT.
+                    for choice in choices:
+                        if not isinstance(choice, dict):
+                            raise ValueError("stream choice must be an object")
+                        delta = choice.get("delta", {})
+                        if not isinstance(delta, dict):
+                            raise ValueError("stream delta must be an object")
+                        content = delta.get("content")
+                        # OpenAI role/finish metadata may omit content or use null.
+                        if content is not None and not isinstance(content, str):
+                            raise ValueError("stream content must be a string or null")
                     delta = choices[0].get("delta", {}) if choices else {}
                     content = delta.get("content")
                     if isinstance(content, str) and content:
@@ -74,6 +90,8 @@ def chat_completion(base_url: str, model: str, prompt: str, max_tokens: int = 12
                         if not isinstance(obj["usage"], dict):
                             raise ValueError("usage must be an object")
                         usage = obj["usage"]
+                if not saw_done:
+                    raise ValueError("stream ended before the [DONE] event")
             else:
                 body = json.loads(resp.read().decode("utf-8"))
                 content = body["choices"][0]["message"]["content"]
