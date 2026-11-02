@@ -1,10 +1,32 @@
 {
+  "schema": "szl.frontier-bench.workload/v1",
+  "workload": {
+    "id": "szl/frontier-bench-smoke-v1",
+    "split": "smoke",
+    "license": "Apache-2.0",
+    "content_sha256": "21edf18a3ff2b6627b86657284e8c3b6010aa18d0302f06f4af30bfc62f40afd"
+  },
   "prompts": [
-    "Explain the difference between TCP and UDP in two sentences.",
-    "Write a Python function that reverses a linked list.",
-    "Summarize the plot of Hamlet in three sentences.",
-    "What are the main causes of inflation?",
-    "Give three tips for improving sleep quality."
+    {
+      "id": "tcp-udp",
+      "text": "Explain the difference between TCP and UDP in two sentences."
+    },
+    {
+      "id": "linked-list",
+      "text": "Write a Python function that reverses a linked list."
+    },
+    {
+      "id": "hamlet",
+      "text": "Summarize the plot of Hamlet in three sentences."
+    },
+    {
+      "id": "inflation",
+      "text": "What are the main causes of inflation?"
+    },
+    {
+      "id": "sleep",
+      "text": "Give three tips for improving sleep quality."
+    }
   ],
   "model_by_engine": {
     "vllm": "meta-llama/Llama-3.1-8B-Instruct",

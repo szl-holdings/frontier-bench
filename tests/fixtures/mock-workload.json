@@ -1,0 +1,23 @@
+{
+  "schema": "szl.frontier-bench.workload/v1",
+  "workload": {
+    "id": "szl/frontier-bench-mock-v1",
+    "split": "synthetic-test",
+    "license": "Apache-2.0",
+    "content_sha256": "359ac0b3eb08d125e8aa68ae706f29b280eab6da6d7143bf0231fc743e0edcbe"
+  },
+  "prompts": [
+    {
+      "id": "mock-prompt",
+      "text": "Return synthetic fixture text."
+    }
+  ],
+  "model_by_engine": {
+    "vllm": "frontier-bench/mock-vllm",
+    "sglang": "frontier-bench/mock-sglang",
+    "tgi": "frontier-bench/mock-tgi",
+    "llama_cpp": "frontier-bench/mock-llama-cpp",
+    "mlx": "frontier-bench/mock-mlx",
+    "transformers": "frontier-bench/mock-transformers"
+  }
+}
