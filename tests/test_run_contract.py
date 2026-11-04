@@ -10,7 +10,6 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -156,7 +155,7 @@ class ExecutionBoundaryTests(unittest.TestCase):
             captured.update(json.loads(request.data.decode("utf-8")))
             return Response()
 
-        with mock.patch("harness.client.urllib.request.urlopen", side_effect=open_request):
+        with unittest.mock.patch("harness.client.urllib.request.urlopen", side_effect=open_request):
             result = chat_completion(
                 "http://fixture.invalid",
                 "frontier-bench/mock-vllm",
@@ -188,9 +187,9 @@ class ExecutionBoundaryTests(unittest.TestCase):
             )
 
     def test_cli_rejects_missing_model_revision_before_health_check(self):
-        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(
+        with tempfile.TemporaryDirectory() as directory, unittest.mock.patch.dict(
             os.environ, {"VLLM_ENDPOINT": "http://fixture.invalid"}, clear=True
-        ), mock.patch("harness.runner.health_check") as health, contextlib.redirect_stderr(
+        ), unittest.mock.patch("harness.runner.health_check") as health, contextlib.redirect_stderr(
             io.StringIO()
         ):
             output = Path(directory) / "result.json"
@@ -223,9 +222,9 @@ class ExecutionBoundaryTests(unittest.TestCase):
                 "errors": ["synthetic failure"],
             },
         }
-        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(
+        with tempfile.TemporaryDirectory() as directory, unittest.mock.patch.dict(
             os.environ, {"VLLM_ENDPOINT": "http://fixture.invalid"}, clear=True
-        ), mock.patch(
+        ), unittest.mock.patch(
             "harness.runner.run_engine", return_value=measured
         ), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             output = Path(directory) / "result.json"
