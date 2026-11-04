@@ -81,3 +81,32 @@ policy and resource-group checks is selected. Both publication and the scheduled
 canary receive that candidate; job outputs contain only its secret label. Missing
 or rejected candidates fail closed, including when the public bundle is unchanged.
 No token value is copied to logs, outputs, persistent files or other repositories.
+
+## Raw benchmark run contract
+
+Raw engine runs bind their inputs before the first health check. The workload JSON
+names an ID and split, gives every prompt a stable ID, and carries a SHA-256 over the
+ordered prompt records. The runner also requires the exact evaluator Git revision,
+one exact model revision for every configured engine, and an explicit unsigned
+32-bit seed:
+
+```bash
+SOURCE_REVISION="$(git rev-parse HEAD)"
+VLLM_ENDPOINT=http://127.0.0.1:8000 python -m harness.runner \
+  --config configs/prompts.json \
+  --source-revision "$SOURCE_REVISION" \
+  --model-revision vllm=<exact-40-character-model-revision> \
+  --seed 0 --repeats 5 --out results.json
+```
+
+The output is `szl.frontier-bench.raw-run/v1`. Its deterministic contract digest
+binds workload/config hashes, source and model revisions, repeats, generation
+settings, seed, and a `DESCRIPTIVE_ONLY` evaluation policy with no threshold or
+tolerance. Request and engine failures remain explicit in `failure_summary` and in
+the per-engine error list.
+
+The generic endpoint does not expose a portable model-revision readback. Source and
+model revisions are therefore labeled caller-declared, and every raw contract sets
+`promotion_eligible: false`. A raw run is not a receipt and cannot enter the public
+bench. Authenticated publication remains the separate v3 admission path documented
+in the [bench-plane operations guide](deploy/bench-plane/BENCH_PLANE_OPERATIONS.md).

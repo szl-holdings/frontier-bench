@@ -38,7 +38,9 @@ def _validated_usage(value):
 
 def chat_completion(base_url: str, model: str, prompt: str, max_tokens: int = 128,
                      temperature: float = 0.0, timeout: float = 60.0,
-                     stream: bool = True) -> GenerationResult:
+                     stream: bool = True, seed: int = 0) -> GenerationResult:
+    if type(seed) is not int or seed < 0 or seed > 2**32 - 1:
+        return GenerationResult(ok=False, error="seed must be an unsigned 32-bit integer")
     url = base_url.rstrip("/") + "/v1/chat/completions"
     payload = {
         "model": model,
@@ -46,6 +48,7 @@ def chat_completion(base_url: str, model: str, prompt: str, max_tokens: int = 12
         "max_tokens": max_tokens,
         "temperature": temperature,
         "stream": stream,
+        "seed": seed,
     }
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})

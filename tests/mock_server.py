@@ -16,6 +16,15 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/v1/chat/completions":
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length))
+            if (
+                body.get("model") != "frontier-bench/mock-vllm"
+                or body.get("seed") != 0
+                or body.get("temperature") != 0.0
+                or body.get("stream") is not True
+            ):
+                self.send_response(400)
+                self.end_headers()
+                return
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()

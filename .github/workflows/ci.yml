@@ -18,6 +18,7 @@ jobs:
       - run: python tests/test_verifier.py
       - run: python tests/test_metrics.py
       - run: python tests/test_client.py
+      - run: python tests/test_run_contract.py
       - name: Citation, pin, receipt, and claim guards
         run: python tests/test_citation_and_guards.py
       - name: Test the bench-plane controller
@@ -26,8 +27,8 @@ jobs:
         run: |
           python tests/mock_server.py &
           sleep 1
-          VLLM_ENDPOINT=http://127.0.0.1:8899 python -m harness.runner --config configs/prompts.json --repeats 2 --out results.json
-          python -c "import json; r=json.load(open('results.json'))['results']; m=[x for x in r if x['status']=='MEASURED']; b=[x for x in r if x['status']=='BLOCKED']; assert len(m)==1 and len(b)==5, r; print('E2E OK: 1 MEASURED, 5 BLOCKED')"
+          VLLM_ENDPOINT=http://127.0.0.1:8899 python -m harness.runner --config tests/fixtures/mock-workload.json --source-revision "$GITHUB_SHA" --model-revision vllm=1111111111111111111111111111111111111111 --seed 0 --repeats 2 --out results.json
+          python -c "import json; p=json.load(open('results.json')); r=p['results']; m=[x for x in r if x['status']=='MEASURED']; b=[x for x in r if x['status']=='BLOCKED']; assert len(m)==1 and len(b)==5 and p['run_contract']['evaluation_policy']['promotion_eligible'] is False and p['failure_summary']['requests_total']==2, p; print('E2E OK: 1 MEASURED, 5 BLOCKED, raw run not promotion-eligible')"
   runtime-smoke:
     name: Docker evidence API integration
     runs-on: ubuntu-latest
