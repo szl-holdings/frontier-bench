@@ -266,15 +266,15 @@ install_missing_member_case("delta_index_only", {"choices": [{"index": 0}]}, "de
 install_missing_member_case("delta_finish_only", {"choices": [{"index": 0, "finish_reason": "stop"}]}, "delta must be an object")
 install_missing_member_case("delta_second_choice", {"choices": [{"delta": {}}, {"index": 1}]}, "delta must be an object")
 
-def test_explicit_empty_delta_finish_remains_valid(self):
+def explicit_empty_delta_finish_remains_valid(self):
     self.check_stream([text(), event({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}), DONE])
-StreamProtocolTests.test_explicit_empty_delta_finish_remains_valid = test_explicit_empty_delta_finish_remains_valid
+StreamProtocolTests.test_explicit_empty_delta_finish_remains_valid = explicit_empty_delta_finish_remains_valid
 
-def test_explicit_usage_array_preserves_counts(self):
+def explicit_usage_array_preserves_counts(self):
     result = self.check_stream([text(), event({"choices": [], "usage": {"completion_tokens": 2, "prompt_tokens": 3}}), DONE])
     self.assertEqual(result.completion_tokens, 2)
     self.assertEqual(result.prompt_tokens, 3)
-StreamProtocolTests.test_explicit_usage_array_preserves_counts = test_explicit_usage_array_preserves_counts
+StreamProtocolTests.test_explicit_usage_array_preserves_counts = explicit_usage_array_preserves_counts
 
 class UsageTokenAdmissionTests(unittest.TestCase):
     def request(self, usage_payload, stream=True, prefix=()):
