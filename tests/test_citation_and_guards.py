@@ -7,6 +7,8 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import tempfile
 import unittest
 import urllib.request
 from pathlib import Path
@@ -18,6 +20,10 @@ MANIFEST_FIXTURE = ROOT / "tests" / "fixtures" / "build-manifest.sha256"
 CLAIM_FILES = ("README.md", "CITATION.cff", "site/index.html", "site/README.md")
 BUILD_FILES = ("Dockerfile", "requirements.txt")
 BUILD_DIRS = ("app", "site")
+# Local by-products, never build sources: interpreter bytecode (written when a
+# test imports app/main.py) and the exports .gitignore excludes from site/.
+BYTECODE_SUFFIXES = (".pyc", ".pyo")
+GENERATED_OUTPUTS = ("site/results.json", "site/deployment.json")
 CLAIM_PATTERNS = (
     re.compile(r"\b\d+(?:\.\d+)?\s*(?:tok/s|tokens/s|tokens per second)\b", re.I),
     re.compile(r"\b(?:speedup|outperforms|state[- ]of[- ]the[- ]art|SOTA|certified performance|faster than)\b", re.I),
@@ -81,10 +87,17 @@ def admitted_measured(receipts):
     return [receipt for receipt in receipts if receipt.get("status") == "MEASURED"]
 
 
+def is_build_source(path, root):
+    relative = path.relative_to(root)
+    if "__pycache__" in relative.parts or relative.suffix in BYTECODE_SUFFIXES:
+        return False
+    return relative.as_posix() not in GENERATED_OUTPUTS
+
+
 def build_manifest_bytes(root):
     paths = [root / name for name in BUILD_FILES]
     for folder in BUILD_DIRS:
-        paths.extend(path for path in (root / folder).rglob("*") if path.is_file())
+        paths.extend(path for path in (root / folder).rglob("*") if path.is_file() and is_build_source(path, root))
     lines = []
     for path in sorted(paths, key=lambda item: item.relative_to(root).as_posix()):
         data = path.read_bytes().replace(b"\r\n", b"\n")
@@ -203,6 +216,26 @@ class CitationAndGuardTests(unittest.TestCase):
         self.assertIn("FROM python:3.14-slim", dockerfile)
         requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
         self.assertIn(">=", requirements)
+
+    def test_source_manifest_ignores_local_byproducts_but_not_new_sources(self):
+        with tempfile.TemporaryDirectory(prefix="szl-manifest-") as temporary:
+            copy = Path(temporary)
+            for name in BUILD_FILES:
+                shutil.copy2(ROOT / name, copy / name)
+            for folder in BUILD_DIRS:
+                shutil.copytree(ROOT / folder, copy / folder, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"))
+            for relative in GENERATED_OUTPUTS:
+                (copy / relative).unlink(missing_ok=True)
+            clean = build_manifest_bytes(copy)
+            # A rerun leaves app/__pycache__ behind; the RUNBOOK export writes site/results.json.
+            (copy / "app" / "__pycache__").mkdir()
+            (copy / "app" / "__pycache__" / "main.cpython-313.pyc").write_bytes(b"bytecode")
+            (copy / "app" / "stray.pyc").write_bytes(b"bytecode")
+            for relative in GENERATED_OUTPUTS:
+                (copy / relative).write_text("{}\n", encoding="utf-8")
+            self.assertEqual(build_manifest_bytes(copy), clean)
+            (copy / "app" / "extra.py").write_text("VALUE = 1\n", encoding="utf-8")
+            self.assertNotEqual(build_manifest_bytes(copy), clean)
 
 
 if __name__ == "__main__":
