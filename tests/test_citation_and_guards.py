@@ -1,6 +1,7 @@
 """Citation, immutable pin, receipt state, claim, and build-manifest guards.
 
-Stdlib unittest only. Live GitHub readback runs when SZL_EXACT_HEAD_READBACK=1.
+Stdlib unittest only; the tracked-file checks call git. Live GitHub readback runs when
+SZL_EXACT_HEAD_READBACK=1.
 """
 import base64
 import hashlib
@@ -8,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import unittest
 import urllib.request
@@ -24,6 +26,8 @@ BUILD_DIRS = ("app", "site")
 # test imports app/main.py) and the exports .gitignore excludes from site/.
 BYTECODE_SUFFIXES = (".pyc", ".pyo")
 GENERATED_OUTPUTS = ("site/results.json", "site/deployment.json")
+# Variables that point git at another repository or index (set inside git hooks).
+GIT_LOCATION_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
 CLAIM_PATTERNS = (
     re.compile(r"\b\d+(?:\.\d+)?\s*(?:tok/s|tokens/s|tokens per second)\b", re.I),
     re.compile(r"\b(?:speedup|outperforms|state[- ]of[- ]the[- ]art|SOTA|certified performance|faster than)\b", re.I),
@@ -104,6 +108,30 @@ def build_manifest_bytes(root):
         digest = hashlib.sha256(data).hexdigest()
         lines.append(f"{digest}  {path.relative_to(root).as_posix()}")
     return ("\n".join(lines) + "\n").encode("ascii")
+
+
+def git(root, *args):
+    executable = shutil.which("git")
+    if executable is None:
+        raise unittest.SkipTest("git is not installed")
+    env = {key: value for key, value in os.environ.items() if key not in GIT_LOCATION_VARIABLES}
+    return subprocess.run([executable, "-C", str(root), *args], capture_output=True, timeout=60, env=env)
+
+
+def tracked_byproducts(root):
+    """Tracked files under BUILD_DIRS that is_build_source leaves out of the manifest.
+
+    The exclusions are for untracked local by-products only. A tracked file is a build
+    input (the Dockerfile copies app/ and site/ whole), so none may hide behind them.
+    """
+    top = git(root, "rev-parse", "--show-toplevel")
+    if top.returncode != 0 or Path(os.fsdecode(top.stdout.strip())).resolve() != Path(root).resolve():
+        raise unittest.SkipTest(f"{root} is not the top of a git work tree: {os.fsdecode(top.stderr).strip()}")
+    listed = git(root, "ls-files", "-z", "--", *BUILD_DIRS)
+    if listed.returncode != 0:
+        raise AssertionError(f"git ls-files failed: {os.fsdecode(listed.stderr).strip()}")
+    names = sorted(os.fsdecode(name) for name in listed.stdout.split(b"\0") if name)
+    return [name for name in names if not is_build_source(Path(root) / name, Path(root))]
 
 
 def github_json(url):
@@ -236,6 +264,25 @@ class CitationAndGuardTests(unittest.TestCase):
             self.assertEqual(build_manifest_bytes(copy), clean)
             (copy / "app" / "extra.py").write_text("VALUE = 1\n", encoding="utf-8")
             self.assertNotEqual(build_manifest_bytes(copy), clean)
+
+    def test_manifest_exclusions_never_hide_tracked_files(self):
+        self.assertEqual(tracked_byproducts(ROOT), [])
+
+    def test_tracked_byproducts_are_reported(self):
+        with tempfile.TemporaryDirectory(prefix="szl-tracked-") as temporary:
+            repo = Path(temporary)
+            initialized = git(repo, "init", "-q")
+            self.assertEqual(initialized.returncode, 0, os.fsdecode(initialized.stderr))
+            (repo / "app" / "__pycache__").mkdir(parents=True)
+            (repo / "site").mkdir()
+            (repo / "app" / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+            (repo / "app" / "__pycache__" / "main.cpython-314.pyc").write_bytes(b"bytecode")
+            (repo / "site" / "results.json").write_text("{}\n", encoding="utf-8")
+            self.assertEqual(git(repo, "add", "app/main.py").returncode, 0)
+            # By-products that exist only on disk stay excluded and are not reported.
+            self.assertEqual(tracked_byproducts(repo), [])
+            self.assertEqual(git(repo, "add", "-f", "app", "site").returncode, 0)
+            self.assertEqual(tracked_byproducts(repo), ["app/__pycache__/main.cpython-314.pyc", "site/results.json"])
 
 
 if __name__ == "__main__":
