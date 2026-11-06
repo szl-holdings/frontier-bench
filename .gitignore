@@ -6,5 +6,7 @@ build/
 *.egg-info/
 .bench-plane-publish/
 runtime-smoke-evidence.json
+# Raw runner output (README and CI default to --out results.json); a raw run is not a receipt.
+/results.json
 site/results.json
 site/deployment.json
