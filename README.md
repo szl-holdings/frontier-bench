@@ -66,7 +66,9 @@ python -I -B tools/publish_space.py --bundle-dir /path/to/audit/bundle --verify-
 
 This re-admits the source receipts and checks immutable and public bytes without
 using publishing credentials or changing the Space. Any content/runtime drift
-fails closed and must be handled by the canonical publisher.
+fails closed and must be handled by the canonical publisher. A Space that is not
+anonymously readable (private, gated or missing) also fails closed, with exit 53
+and the HTTP status in the report.
 
 ## Status
 
@@ -81,6 +83,46 @@ policy and resource-group checks is selected. Both publication and the scheduled
 canary receive that candidate; job outputs contain only its secret label. Missing
 or rejected candidates fail closed, including when the public bundle is unchanged.
 No token value is copied to logs, outputs, persistent files or other repositories.
+
+## Install and test
+
+The harness, receipt verifier, publisher tools and test suites use only the Python
+standard library (Python 3.11 or newer; CI runs 3.11 to 3.14). Install
+`requirements.txt` only for the FastAPI service in `app/`; the Hub publisher uses the
+pinned client in `deploy/bench-plane/requirements-publish.txt`.
+
+```bash
+python -m venv .venv && . .venv/bin/activate
+python -m pip install -r requirements.txt   # only needed for app/
+
+python verify/verifier.py receipts/*.json
+python -m unittest discover -s tests -p "test_*.py"
+python -I -B deploy/bench-plane/test_finish_bench_plane.py
+node --test deploy/bench-plane/test_bench_surface.mjs
+```
+
+For the shipped genesis-only chain the verifier prints
+`checked=1 declared_measured=0 authenticity=UNVERIFIED errors=0`. One test,
+`test_exact_head_readback`, is skipped unless `SZL_EXACT_HEAD_READBACK=1`; it reads
+the pinned brand commit from the GitHub API, and the CI honesty job sets it.
+
+To exercise the runner without an inference engine, use the synthetic mock that CI
+uses. It streams canned text, so its timings describe the mock, not any engine:
+
+```bash
+python tests/mock_server.py & MOCK_PID=$!
+sleep 1
+VLLM_ENDPOINT=http://127.0.0.1:8899 python -m harness.runner \
+  --config tests/fixtures/mock-workload.json \
+  --source-revision "$(git rev-parse HEAD)" \
+  --model-revision vllm=1111111111111111111111111111111111111111 \
+  --seed 0 --repeats 2 --out results.json
+kill "$MOCK_PID"
+```
+
+The runner labels the mock-backed `vllm` row `MEASURED` (it measured the mock) and
+the five unconfigured engines `BLOCKED`, and the run contract stays
+`promotion_eligible: false`.
 
 ## Raw benchmark run contract
 
