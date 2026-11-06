@@ -86,10 +86,13 @@ No token value is copied to logs, outputs, persistent files or other repositorie
 
 ## Install and test
 
-The harness, receipt verifier, publisher tools and test suites use only the Python
-standard library (Python 3.11 or newer; CI runs 3.11 to 3.14). Install
-`requirements.txt` only for the FastAPI service in `app/`; the Hub publisher uses the
-pinned client in `deploy/bench-plane/requirements-publish.txt`.
+The harness, receipt verifier, results tools and test suites need only the Python
+standard library (Python 3.11 or newer; CI runs 3.11 to 3.14), plus Node.js, which
+the tests use to run the browser scripts. Install `requirements.txt` only for the
+FastAPI service in `app/`. The Hub publisher `tools/publish_space.py` needs the
+pinned client in `deploy/bench-plane/requirements-publish.txt`, and the optional
+browser check `tools/verify_bench_browser.py` needs Playwright, which no requirements
+file pins.
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
@@ -104,7 +107,8 @@ node --test deploy/bench-plane/test_bench_surface.mjs
 For the shipped genesis-only chain the verifier prints
 `checked=1 declared_measured=0 authenticity=UNVERIFIED errors=0`. One test,
 `test_exact_head_readback`, is skipped unless `SZL_EXACT_HEAD_READBACK=1`; it reads
-the pinned brand commit from the GitHub API, and the CI honesty job sets it.
+the pinned brand commit from the GitHub API, and the CI honesty job sets it. The two
+tracked-file checks of the build manifest also skip outside a git checkout.
 
 To exercise the runner without an inference engine, use the synthetic mock that CI
 uses. It streams canned text, so its timings describe the mock, not any engine:
