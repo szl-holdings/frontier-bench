@@ -156,7 +156,22 @@ def verify_anonymous_noop(controller: ModuleType, files: dict[str, bytes], run_r
     from huggingface_hub import HfApi
 
     api = HfApi(token=False)
-    before = api.space_info(repo_id=TARGET)
+    try:
+        before = api.space_info(repo_id=TARGET)
+    except Exception as exc:
+        # The Hub answers anonymous reads of a private, gated or missing Space
+        # with 401/403/404, so the private check below is never reached. Report
+        # that as a provider witness failure, not an internal error; no write
+        # authority is resolved on this path.
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status in (401, 403, 404):
+            raise controller.BenchError(
+                "anonymous_witness",
+                f"{TARGET} is not anonymously readable (HTTP {status}): the Space is private, gated or missing, "
+                "so its public evidence surface cannot be witnessed",
+                controller.EXIT_PROVIDER,
+            ) from None
+        raise
     before_sha = str(getattr(before, "sha", ""))
     if getattr(before, "id", TARGET) != TARGET or not controller.COMMIT_RE.fullmatch(before_sha):
         raise controller.BenchError("anonymous_witness", "provider returned an unexpected Space or revision", controller.EXIT_PROVIDER)
@@ -392,6 +407,9 @@ def run_credential_selection(controller: ModuleType) -> int:
             selected = name
             break
         if selected is None:
+            if not any(row["present"] for row in report["candidates"]):
+                names = " and ".join(row["secret"] for row in report["candidates"])
+                raise controller.BenchError("hub_auth", f"no credential candidate is configured: the {names} Actions secrets are empty or not available to this run", controller.EXIT_HUB_AUTH)
             raise controller.BenchError("hub_auth", "no candidate has verified write authorization for the target Space", controller.EXIT_HUB_AUTH)
         # Both the publisher and the scheduled canary resolve the same selected
         # label through Actions expressions. No token is written to job output.

@@ -518,6 +518,32 @@ class AnonymousWitnessTests(unittest.TestCase):
         with self.assertRaisesRegex(controller.BenchError, "changed during the public witness"):
             self.invoke()
 
+    def test_anonymously_unreadable_space_is_a_provider_witness_failure(self) -> None:
+        # The Hub answers anonymous reads of a private, gated or missing Space with
+        # 401/403/404 before any private flag is visible. That is a provider witness
+        # failure (exit 53), never an internal error, and nothing else is contacted.
+        for status in (401, 403, 404):
+            class Refused(Exception):
+                response = SimpleNamespace(status_code=status)
+
+            with self.subTest(status=status):
+                self.factory.reset_mock()
+                self.api.reset_mock()
+                self.api.space_info.side_effect = Refused("Repository Not Found")
+                with self.assertRaises(controller.BenchError) as raised:
+                    self.invoke()
+                self.assertEqual(raised.exception.phase, "anonymous_witness")
+                self.assertEqual(raised.exception.exit_code, controller.EXIT_PROVIDER)
+                self.assertIn(f"HTTP {status}", str(raised.exception))
+                self.assertIn("not anonymously readable", str(raised.exception))
+                self.api.get_space_runtime.assert_not_called()
+                self.api.list_repo_files.assert_not_called()
+
+    def test_anonymous_transport_errors_are_not_reclassified(self) -> None:
+        self.api.space_info.side_effect = OSError("connection reset")
+        with self.assertRaises(OSError):
+            self.invoke()
+
     def test_provider_host_allowlist_accepts_expected_hosts(self) -> None:
         for host in publisher.ALLOWED_LIVE_HOSTS:
             self.assertEqual(publisher._live_url(SimpleNamespace(host=f"https://{host}")), f"https://{host}/")
@@ -788,6 +814,23 @@ class CredentialSelectionTests(unittest.TestCase):
             self.assertEqual(code, controller.EXIT_HUB_AUTH)
             self.assertEqual(report["state"], "FAILED_CLOSED")
             self.assertEqual(output, "")
+
+    def test_absent_candidates_are_named_without_contacting_the_provider(self):
+        never = Mock(side_effect=AssertionError("absent secrets must not reach the provider"))
+        code, report, output, check = self.invoke({}, never)
+        self.assertEqual(code, controller.EXIT_HUB_AUTH)
+        self.assertEqual(report["state"], "FAILED_CLOSED")
+        self.assertEqual(output, "")
+        self.assertEqual([(row["secret"], row["present"]) for row in report["candidates"]],
+                         [("HF_ORG_TOKEN", False), ("HF_TOKEN", False)])
+        self.assertIn("HF_ORG_TOKEN and HF_TOKEN Actions secrets are empty", report["failure"]["error"])
+        check.assert_not_called()
+
+    def test_present_but_rejected_candidates_keep_the_authorization_message(self):
+        def reject(*_):
+            raise controller.BenchError("hub_auth", "not admitted", controller.EXIT_HUB_AUTH)
+        _, report, _, _ = self.invoke({"HF_TOKEN": FAKE_TOKEN}, reject)
+        self.assertEqual(report["failure"]["error"], "no candidate has verified write authorization for the target Space")
 
     def test_interrupt_does_not_try_next_candidate(self):
         def interrupt(*_):
