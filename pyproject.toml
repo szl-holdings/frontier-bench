@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "frontier-bench"
+version = "0.1.0"
+description = "Frontier Inference Engine Benchmark Harness — vendor-neutral OpenAI-compatible benchmarking for vLLM, SGLang, TGI, llama.cpp, MLX, Transformers. Real measured TTFT/p50/p95/p99/throughput only"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [{ name = "Stephen Lutar", email = "stephen@szlholdings.com" }]
+dependencies = ["fastapi>=0.162.0", "uvicorn[standard]>=0.54.0"]
+
+[project.urls]
+Homepage = "https://a-11-oy.com"
+Repository = "https://github.com/szl-holdings/frontier-bench"
+
+[tool.setuptools]
+packages = ["harness"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["build", "dist", ".venv", "node_modules"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"

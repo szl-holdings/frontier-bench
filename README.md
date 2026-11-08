@@ -156,3 +156,9 @@ model revisions are therefore labeled caller-declared, and every raw contract se
 `promotion_eligible: false`. A raw run is not a receipt and cannot enter the public
 bench. Authenticated publication remains the separate v3 admission path documented
 in the [bench-plane operations guide](deploy/bench-plane/BENCH_PLANE_OPERATIONS.md).
+
+Estate on Hugging Face: models, datasets and Spaces are published under the [SZLHOLDINGS](https://huggingface.co/SZLHOLDINGS) org.
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE).
