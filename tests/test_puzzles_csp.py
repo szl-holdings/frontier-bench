@@ -1,7 +1,6 @@
 import unittest
 
 from puzzles.csp import CSP, alldiff, table
-from puzzles.dpll import ClauseDB, Solver
 
 
 def small_permutation_csp():

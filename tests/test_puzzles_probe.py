@@ -11,7 +11,6 @@ from puzzles.probe import (
     main as probe_main,
     normalize_solution,
 )
-from puzzles.render import render
 
 
 class TestVerdictLogic(unittest.TestCase):
