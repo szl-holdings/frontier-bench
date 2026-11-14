@@ -21,6 +21,7 @@ jobs:
       - run: python tests/test_metrics.py
       - run: python tests/test_client.py
       - run: python tests/test_run_contract.py
+      - run: python tests/test_energy.py
       - name: Citation, pin, receipt, and claim guards
         run: python tests/test_citation_and_guards.py
       - name: Test the bench-plane controller
