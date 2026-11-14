@@ -5,6 +5,7 @@ or /v1/completions endpoint can be measured with this client.
 """
 import time
 import json
+import math
 import urllib.request
 import urllib.error
 from dataclasses import dataclass
@@ -21,6 +22,33 @@ class GenerationResult:
     completion_tokens: Optional[int] = None
     error: Optional[str] = None
     status_code: Optional[int] = None
+
+
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('duplicate JSON key')
+        result[key] = value
+    return result
+
+
+def _reject_constant(_value):
+    raise ValueError('non-finite JSON number')
+
+
+def _finite_float(value):
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError('non-finite JSON number')
+    return number
+
+
+def _response_json(raw):
+    # Validate the complete event, including nested/unused provider metadata.
+    # Last-key-wins parsing could otherwise erase an invalid usage count.
+    return json.loads(raw, object_pairs_hook=_unique_object,
+                      parse_constant=_reject_constant, parse_float=_finite_float)
 
 
 def _validated_usage(value):
@@ -71,7 +99,7 @@ def chat_completion(base_url: str, model: str, prompt: str, max_tokens: int = 12
                         saw_done = True
                         break
                     try:
-                        obj = json.loads(chunk)
+                        obj = _response_json(chunk)
                     except json.JSONDecodeError as exc:
                         raise ValueError("stream contained invalid JSON data") from exc
                     if not isinstance(obj, dict):
@@ -107,7 +135,11 @@ def chat_completion(base_url: str, model: str, prompt: str, max_tokens: int = 12
                 if not saw_done:
                     raise ValueError("stream ended before the [DONE] event")
             else:
-                body = json.loads(resp.read().decode("utf-8"))
+                body = _response_json(resp.read().decode("utf-8"))
+                if not isinstance(body, dict):
+                    raise ValueError("response JSON data must be an object")
+                if "error" in body:
+                    raise ValueError("response contained a provider error")
                 content = body["choices"][0]["message"]["content"]
                 if isinstance(content, str) and content:
                     text_chunks.append(content)

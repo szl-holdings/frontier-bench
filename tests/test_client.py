@@ -1,6 +1,7 @@
 """Regression tests for benchmark timing and response admission."""
 
 import json
+import math
 import os
 import sys
 import unittest
@@ -27,6 +28,63 @@ class _Response:
 
     def read(self):
         return self._body
+
+
+class StrictResponseAdmissionTests(unittest.TestCase):
+    def admit(self, raw, stream):
+        response = _Response(
+            body=raw,
+            lines=[b'data: ' + raw + b'\n\n', b'data: [DONE]\n\n'],
+        )
+        with patch('harness.client.urllib.request.urlopen', return_value=response):
+            return chat_completion('http://engine.invalid', 'fixture', 'fixture', stream=stream)
+
+    def response_bytes(self, stream, extra):
+        choice = b'"delta"' if stream else b'"message"'
+        return b'{"choices":[{' + choice + b':{"content":"hello"}}],' + extra + b'}'
+
+    def test_duplicate_keys_reject_instead_of_replacing_invalid_usage(self):
+        for stream in (False, True):
+            for extra in (
+                b'"usage":{"completion_tokens":-1,"completion_tokens":100}',
+                b'"usage":[],"usage":{"completion_tokens":100}',
+                b'"metadata":{"nested":{"id":1,"id":2}}',
+                b'"metadata":{"nested":[{"id":1,"id":2}]}',
+            ):
+                with self.subTest(stream=stream, extra=extra):
+                    result = self.admit(self.response_bytes(stream, extra), stream)
+                    self.assertFalse(result.ok)
+                    self.assertEqual(result.text, '')
+                    self.assertIsNone(result.completion_tokens)
+                    self.assertIn('duplicate JSON key', result.error)
+
+    def test_nonfinite_json_rejects_even_in_unused_metadata(self):
+        for stream in (False, True):
+            for number in (b'NaN', b'Infinity', b'-Infinity', b'1e999', b'-1e999'):
+                with self.subTest(stream=stream, number=number):
+                    raw = self.response_bytes(stream, b'"metadata":{"nested":[' + number + b']}')
+                    result = self.admit(raw, stream)
+                    self.assertFalse(result.ok)
+                    self.assertEqual(result.text, '')
+                    self.assertIn('non-finite JSON number', result.error)
+
+    def test_nonstream_provider_error_cannot_become_successful_text(self):
+        for error in (b'null', b'{}', b'{"message":"private diagnostic"}'):
+            with self.subTest(error=error):
+                result = self.admit(self.response_bytes(False, b'"error":' + error), False)
+                self.assertFalse(result.ok)
+                self.assertEqual(result.text, '')
+                self.assertIn('provider error', result.error)
+                self.assertNotIn('private diagnostic', result.error)
+
+    def test_finite_metadata_and_ordinary_usage_remain_accepted(self):
+        for stream in (False, True):
+            with self.subTest(stream=stream):
+                raw = self.response_bytes(stream, b'"metadata":{"score":1e2,"label":"NaN"},"usage":{"completion_tokens":2}')
+                result = self.admit(raw, stream)
+                self.assertTrue(result.ok, result.error)
+                self.assertEqual(result.text, 'hello')
+                self.assertEqual(result.completion_tokens, 2)
 
 
 def _event(payload):
@@ -293,7 +351,10 @@ class UsageTokenAdmissionTests(unittest.TestCase):
                     with self.subTest(field=field, value=value, stream=stream):
                         result = self.request({"usage": {field: value}}, stream)
                         self.assertFalse(result.ok)
-                        self.assertIn(field + " must be a non-negative integer or null", result.error)
+                        expected_error = ('non-finite JSON number'
+                                          if isinstance(value, float) and not math.isfinite(value)
+                                          else field + ' must be a non-negative integer or null')
+                        self.assertIn(expected_error, result.error)
                         self.assertEqual(result.text, "")
                         self.assertIsNone(result.ttft_s)
                         self.assertIsNone(result.total_s)
