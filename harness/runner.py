@@ -7,6 +7,9 @@ Rules enforced:
 - Workload bytes, prompt rows, evaluator revision, seed, and generation settings
   are bound by one deterministic contract digest.
 - Raw runs are DESCRIPTIVE_ONLY and never publication-eligible.
+- Every executed engine region carries an honest energy block: MEASURED
+  joules only when the endpoint is colocated and NVML readback is available;
+  otherwise mode="unmeasured" with joules=None and a reason. Never fabricated.
 """
 from __future__ import annotations
 
@@ -20,6 +23,7 @@ import tempfile
 
 from harness.engine_registry import REGISTRY, available_engines, unavailable_engines
 from harness.client import chat_completion, health_check
+from harness.energy import capability_summary, engine_energy_meter
 from harness.metrics import RunSample, summarize
 from harness.run_contract import (
     RAW_RUN_SCHEMA,
@@ -28,7 +32,6 @@ from harness.run_contract import (
     load_workload,
     parse_model_revisions,
 )
-
 
 def run_engine(engine_key, spec, prompts, model, repeats, max_tokens, seed=0):
     if (
@@ -52,32 +55,46 @@ def run_engine(engine_key, spec, prompts, model, repeats, max_tokens, seed=0):
             "reason": "health check failed",
         }
 
+    meter = engine_energy_meter(endpoint)
     samples = []
-    for prompt in prompts:
-        for _ in range(repeats):
-            result = chat_completion(
-                endpoint,
-                model,
-                prompt,
-                max_tokens=max_tokens,
-                seed=seed,
-            )
-            samples.append(
-                RunSample(
-                    ok=result.ok,
-                    ttft_s=result.ttft_s,
-                    total_s=result.total_s,
-                    completion_tokens=result.completion_tokens,
-                    error=result.error,
+    meter.start()
+    try:
+        for prompt in prompts:
+            for _ in range(repeats):
+                result = chat_completion(
+                    endpoint,
+                    model,
+                    prompt,
+                    max_tokens=max_tokens,
+                    seed=seed,
                 )
-            )
+                meter.sample()
+                samples.append(
+                    RunSample(
+                        ok=result.ok,
+                        ttft_s=result.ttft_s,
+                        total_s=result.total_s,
+                        completion_tokens=result.completion_tokens,
+                        error=result.error,
+                    )
+                )
+    finally:
+        meter.stop()
+    completion_tokens = sum(
+        s.completion_tokens for s in samples if s.ok and s.completion_tokens is not None
+    )
+    energy = meter.result(n_requests=len(samples), completion_tokens=completion_tokens)
     try:
         summary = summarize(engine_key, model, samples)
     except ValueError:
-        return {"engine": engine_key, "status": "INVALID", "reason": "invalid sample values"}
+        return {
+            "engine": engine_key,
+            "status": "INVALID",
+            "reason": "invalid sample values",
+            "energy": energy,
+        }
     status = "MEASURED" if summary.n_success > 0 and summary.p50_total_ms is not None else "FAILED"
-    return {"engine": engine_key, "status": status, "summary": summary.to_dict()}
-
+    return {"engine": engine_key, "status": status, "summary": summary.to_dict(), "energy": energy}
 
 def _write_json_atomic(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -92,7 +109,6 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
-
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
@@ -156,6 +172,7 @@ def main(argv=None) -> int:
             "schema": RAW_RUN_SCHEMA,
             "observed_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
             "run_contract": contract,
+            "energy_capability": capability_summary(),
             "failure_summary": failure_summary(results),
             "results": results,
         }
