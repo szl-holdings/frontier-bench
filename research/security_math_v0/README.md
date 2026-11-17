@@ -45,6 +45,32 @@ For finite abelian G, b_g(G) = |G|^(g-1) * |G[2]|.
 
 For genus 5, two **independent** algorithms return C2=32, C3=81, C2 x C3=2592, S3=502, and Q8=4352. An additional mixed nonabelian check confirms S3 x C2 gives 16,064 via Burnside and the product of independently checked factor results. The group-table validators independently check identity, inverses and associativity. The two algorithms use explicit conjugacy representatives versus centralizer dynamic programming. Bounded test fixtures are original synthetic constructions, not copies from the benchmark.
 
+### Third mathematical cross-check: character theory
+
+For a finite G with irreducible representations of complex dimension d_χ
+and Frobenius–Schur indicator ν_χ, Klug's closed-nonorientable formula gives
+
+    |Hom(pi_1(N_g),G)| = |G|^(g-1) sum_χ ν_χ^g d_χ^(2-g).
+
+This is checked with exact rational arithmetic, not floats, using separately
+declared character fixtures for C2, C3, C4, S3 and Q8. For g=5:
+
+- S3: irreducible degrees (1,1,2), all indicators +1,
+  giving 2,754 homomorphisms into S3. The centralizers (S3 once,
+  C2 three times, C3 twice) give (2,754 + 3*32 + 2*81)/6 = 502 orbits.
+- Q8: four real one-dimensional irreps and a two-dimensional quaternionic
+  irrep with indicator -1 give 15,872 homomorphisms into Q8.
+  Centralizers (Q8 twice and C4 six times) give
+  (2*15,872 + 6*512)/8 = 4,352 orbits.
+- Independent direct explicit conjugacy enumeration and centralizer DP
+  match both resulting orbit counts.
+
+These known character dimensions/indicators and centralizer multiplicities
+are declared inputs, not computed or kernel-checked by this candidate.
+The third method does not prove that supplied character data are complete
+or correct for an arbitrary G. It is another adversarial cross-check and
+an explicit *proof obligation* for future automatic group adapters.
+
 This is NOT a solution to the screenshot problem. It requires the exact group laws for the fundamental groups of the classifying spaces of the modular bimodule categories, including the block Picard/Morita groups. Their finite-group presentation, completeness and verified multiplication tables are not supplied. Without those, the benchmark result is UNAVAILABLE regardless of matching a published factorization.
 
 Source: Michael R. Klug, Counting homomorphisms from surface groups to finite groups, Canadian Mathematical Bulletin, doi:10.4153/S0008439524000420.
