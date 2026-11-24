@@ -241,7 +241,7 @@ class CitationAndGuardTests(unittest.TestCase):
         recorded = MANIFEST_FIXTURE.read_text(encoding="utf-8").strip()
         self.assertEqual(first, recorded)
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-        self.assertIn("FROM python:3.14-slim", dockerfile)
+        self.assertIn("FROM python:3.15-slim", dockerfile)
         requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
         self.assertIn(">=", requirements)
 
